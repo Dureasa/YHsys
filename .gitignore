@@ -1,1 +1,22 @@
 127.0.0.1:7890
+CLAUDE.md
+
+# OS kernel build artifacts
+os/kernel/*.o
+os/kernel/*.d
+os/kernel/*.asm
+os/kernel/*.sym
+os/kernel/kernel
+
+# OS user programs build artifacts
+os/user/*.o
+os/user/*.d
+os/user/*.asm
+os/user/*.sym
+os/user/usys.S
+os/user/_*
+
+# OS generated files
+os/fs.img
+os/mkfs/mkfs
+os/.gdbinit
