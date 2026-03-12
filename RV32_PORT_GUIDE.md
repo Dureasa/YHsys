@@ -2,6 +2,30 @@
 
 本文档详细描述将 YHsys 从 RV64（64位 RISC-V）移植到 RV32（32位 RISC-V）架构所需的所有修改。
 
+## 当前进度
+
+**阶段 1: 构建系统和基础编译** ✅ 已完成
+
+已完成的修改（提交记录）：
+- `c748134` build: configure Makefile for RV32 architecture
+- `f96d62f` arch: update riscv.h for Sv32 page table (RV32)
+- `fdb0082` arch: change trapframe to 32-bit types for RV32
+- `6d28744` arch: fix start.c for RV32 compatibility
+- `849e909` arch: update assembly files for RV32
+- `935d534` arch: fix printf.c and virtio_disk.c for RV32
+
+**内核已可成功编译为 RV32 ELF 格式**
+
+待完成：
+- [ ] vm.c 中 walk() 改为 2 级页表
+- [ ] 更新 SATP_SV39 为 SATP_SV32
+- [ ] 更新 CSR 读写函数为 uint32
+- [ ] 修改 trap.c 中 scause 检查值
+- [ ] 编译用户程序
+- [ ] QEMU 运行测试
+
+---
+
 ## 1. 概述
 
 当前系统基于 xv6 的 RV64 实现，使用 Sv39 页表方案。移植到 RV32 需要改用 Sv32 页表方案，并相应调整所有数据类型、寄存器操作和内存布局。
