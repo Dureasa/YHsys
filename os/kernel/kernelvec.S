@@ -10,55 +10,55 @@
 .globl kernelvec
 .align 4
 kernelvec:
-        # make room to save registers.
-        addi sp, sp, -256
+        # make room to save registers (128 bytes for 32 registers * 4 bytes).
+        addi sp, sp, -128
 
         # save caller-saved registers.
-        sd ra, 0(sp)
-        # sd sp, 8(sp)
-        sd gp, 16(sp)
-        sd tp, 24(sp)
-        sd t0, 32(sp)
-        sd t1, 40(sp)
-        sd t2, 48(sp)
-        sd a0, 72(sp)
-        sd a1, 80(sp)
-        sd a2, 88(sp)
-        sd a3, 96(sp)
-        sd a4, 104(sp)
-        sd a5, 112(sp)
-        sd a6, 120(sp)
-        sd a7, 128(sp)
-        sd t3, 216(sp)
-        sd t4, 224(sp)
-        sd t5, 232(sp)
-        sd t6, 240(sp)
+        sw ra, 0(sp)
+        # sw sp, 4(sp)
+        sw gp, 8(sp)
+        sw tp, 12(sp)
+        sw t0, 16(sp)
+        sw t1, 20(sp)
+        sw t2, 24(sp)
+        sw a0, 36(sp)
+        sw a1, 40(sp)
+        sw a2, 44(sp)
+        sw a3, 48(sp)
+        sw a4, 52(sp)
+        sw a5, 56(sp)
+        sw a6, 60(sp)
+        sw a7, 64(sp)
+        sw t3, 108(sp)
+        sw t4, 112(sp)
+        sw t5, 116(sp)
+        sw t6, 120(sp)
 
         # call the C trap handler in trap.c
         call kerneltrap
 
         # restore registers.
-        ld ra, 0(sp)
-        # ld sp, 8(sp)
-        ld gp, 16(sp)
+        lw ra, 0(sp)
+        # lw sp, 4(sp)
+        lw gp, 8(sp)
         # not tp (contains hartid), in case we moved CPUs
-        ld t0, 32(sp)
-        ld t1, 40(sp)
-        ld t2, 48(sp)
-        ld a0, 72(sp)
-        ld a1, 80(sp)
-        ld a2, 88(sp)
-        ld a3, 96(sp)
-        ld a4, 104(sp)
-        ld a5, 112(sp)
-        ld a6, 120(sp)
-        ld a7, 128(sp)
-        ld t3, 216(sp)
-        ld t4, 224(sp)
-        ld t5, 232(sp)
-        ld t6, 240(sp)
+        lw t0, 16(sp)
+        lw t1, 20(sp)
+        lw t2, 24(sp)
+        lw a0, 36(sp)
+        lw a1, 40(sp)
+        lw a2, 44(sp)
+        lw a3, 48(sp)
+        lw a4, 52(sp)
+        lw a5, 56(sp)
+        lw a6, 60(sp)
+        lw a7, 64(sp)
+        lw t3, 108(sp)
+        lw t4, 112(sp)
+        lw t5, 116(sp)
+        lw t6, 120(sp)
 
-        addi sp, sp, 256
+        addi sp, sp, 128
 
         # return to whatever we were doing in the kernel.
         sret
