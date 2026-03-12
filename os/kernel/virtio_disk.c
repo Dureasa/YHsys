@@ -131,12 +131,12 @@ virtio_disk_init(void)
   *R(VIRTIO_MMIO_QUEUE_NUM) = NUM;
 
   // write physical addresses.
-  *R(VIRTIO_MMIO_QUEUE_DESC_LOW) = (uint64)disk.desc;
-  *R(VIRTIO_MMIO_QUEUE_DESC_HIGH) = (uint64)disk.desc >> 32;
-  *R(VIRTIO_MMIO_DRIVER_DESC_LOW) = (uint64)disk.avail;
-  *R(VIRTIO_MMIO_DRIVER_DESC_HIGH) = (uint64)disk.avail >> 32;
-  *R(VIRTIO_MMIO_DEVICE_DESC_LOW) = (uint64)disk.used;
-  *R(VIRTIO_MMIO_DEVICE_DESC_HIGH) = (uint64)disk.used >> 32;
+  *R(VIRTIO_MMIO_QUEUE_DESC_LOW) = (uint32)disk.desc;
+  *R(VIRTIO_MMIO_QUEUE_DESC_HIGH) = 0;
+  *R(VIRTIO_MMIO_DRIVER_DESC_LOW) = (uint32)disk.avail;
+  *R(VIRTIO_MMIO_DRIVER_DESC_HIGH) = 0;
+  *R(VIRTIO_MMIO_DEVICE_DESC_LOW) = (uint32)disk.used;
+  *R(VIRTIO_MMIO_DEVICE_DESC_HIGH) = 0;
 
   // queue is ready.
   *R(VIRTIO_MMIO_QUEUE_READY) = 0x1;
