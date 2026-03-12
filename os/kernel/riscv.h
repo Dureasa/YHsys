@@ -219,10 +219,10 @@ w_pmpaddr0(uint64 x)
   asm volatile("csrw pmpaddr0, %0" : : "r" (x));
 }
 
-// use riscv's sv39 page table scheme.
-#define SATP_SV39 (8L << 60)
+// use riscv's sv32 page table scheme (RV32).
+#define SATP_SV32 (1L << 31)
 
-#define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64)pagetable) >> 12))
+#define MAKE_SATP(pagetable) (SATP_SV32 | (((uint32)pagetable) >> 12))
 
 // supervisor address translation and protection;
 // holds the address of the page table.
@@ -368,13 +368,12 @@ typedef uint64 *pagetable_t; // 512 PTEs
 
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)
 
-// extract the three 9-bit page table indices from a virtual address.
-#define PXMASK          0x1FF // 9 bits
-#define PXSHIFT(level)  (PGSHIFT+(9*(level)))
-#define PX(level, va) ((((uint64) (va)) >> PXSHIFT(level)) & PXMASK)
+// extract the two 10-bit page table indices from a virtual address (Sv32).
+#define PXMASK          0x3FF // 10 bits
+#define PXSHIFT(level)  (PGSHIFT+(10*(level)))
+#define PX(level, va) ((((uint32) (va)) >> PXSHIFT(level)) & PXMASK)
 
 // one beyond the highest possible virtual address.
-// MAXVA is actually one bit less than the max allowed by
-// Sv39, to avoid having to sign-extend virtual addresses
-// that have the high bit set.
-#define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
+// Sv32: 2-level page table, 10+10+12 bits = 4GB address space
+// MAXVA = 4GB = 0x100000000, but use 0xFFFFFFFF + 1 for clarity
+#define MAXVA (0xFFFFFFFF + 1UL)
