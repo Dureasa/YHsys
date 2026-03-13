@@ -137,7 +137,7 @@ UPROGS=\
 	$U/_rm\
 	$U/_sh\
 	$U/_stressfs\
-	$U/_usertests\
+#	$U/_usertests\  # Disabled for RV32 port - contains 64-bit address tests
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
