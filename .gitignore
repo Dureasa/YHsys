@@ -20,3 +20,5 @@ os/user/_*
 os/fs.img
 os/mkfs/mkfs
 os/.gdbinit
+
+core.*
