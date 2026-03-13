@@ -98,8 +98,8 @@ void            userinit(void);
 int             kwait(uint64);
 void            wakeup(void*);
 void            yield(void);
-int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
-int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
+int             either_copyout(int user_dst, uint32 dst, void *src, uint32 len);
+int             either_copyin(void *dst, int user_src, uint32 src, uint32 len);
 void            procdump(void);
 
 // swtch.S
@@ -153,22 +153,22 @@ int             uartgetc(void);
 // vm.c
 void            kvminit(void);
 void            kvminithart(void);
-void            kvmmap(pagetable_t, uint64, uint64, uint64, int);
-int             mappages(pagetable_t, uint64, uint64, uint64, int);
+void            kvmmap(pagetable_t, uint32, uint32, uint32, int);
+int             mappages(pagetable_t, uint32, uint32, uint32, int);
 pagetable_t     uvmcreate(void);
-uint64          uvmalloc(pagetable_t, uint64, uint64, int);
-uint64          uvmdealloc(pagetable_t, uint64, uint64);
-int             uvmcopy(pagetable_t, pagetable_t, uint64);
-void            uvmfree(pagetable_t, uint64);
-void            uvmunmap(pagetable_t, uint64, uint64, int);
-void            uvmclear(pagetable_t, uint64);
-pte_t *         walk(pagetable_t, uint64, int);
-uint64          walkaddr(pagetable_t, uint64);
-int             copyout(pagetable_t, uint64, char *, uint64);
-int             copyin(pagetable_t, char *, uint64, uint64);
-int             copyinstr(pagetable_t, char *, uint64, uint64);
-int             ismapped(pagetable_t, uint64);
-uint64          vmfault(pagetable_t, uint64, int);
+uint32          uvmalloc(pagetable_t, uint32, uint32, int);
+uint32          uvmdealloc(pagetable_t, uint32, uint32);
+int             uvmcopy(pagetable_t, pagetable_t, uint32);
+void            uvmfree(pagetable_t, uint32);
+void            uvmunmap(pagetable_t, uint32, uint32, int);
+void            uvmclear(pagetable_t, uint32);
+pte_t *         walk(pagetable_t, uint32, int);
+uint32          walkaddr(pagetable_t, uint32);
+int             copyout(pagetable_t, uint32, char *, uint32);
+int             copyin(pagetable_t, char *, uint32, uint32);
+int             copyinstr(pagetable_t, char *, uint32, uint32);
+int             ismapped(pagetable_t, uint32);
+uint32          vmfault(pagetable_t, uint32, int);
 
 // plic.c
 void            plicinit(void);
