@@ -3,25 +3,88 @@
 
 ## 当前进度
 
-**阶段 1: 构建系统和基础编译** ✅ 已完成
+### 阶段 1: 构建系统和基础类型定义 ✅ 已完成
 
-已完成的修改（提交记录）：
-- `c748134` build: configure Makefile for RV32 architecture
-- `f96d62f` arch: update riscv.h for Sv32 page table (RV32)
-- `fdb0082` arch: change trapframe to 32-bit types for RV32
-- `6d28744` arch: fix start.c for RV32 compatibility
-- `849e909` arch: update assembly files for RV32
-- `935d534` arch: fix printf.c and virtio_disk.c for RV32
+**2026-03-13 已完成：**
+- `f1dc1f9` arch: RV32 port - update kernel core files for 32-bit
+  - `types.h`: uint64 改为 unsigned long long，pde_t 改为 uint32
+  - `riscv.h`: 所有 CSR 函数改为 uint32，Sv32 页表常量
+  - `start.c`: w_mepc 使用 uint32 转换
+  - `vm.c`: 2 级页表（Sv32），1024 PTEs，所有函数改为 uint32
+  - `defs.h`: 更新函数签名
+  - `kalloc.c`, `exec.c`, `proc.c`: 部分 uint64 -> uint32 修复
 
-**内核已可成功编译为 RV32 ELF 格式**
+### 阶段 2: 进程和数据结构修改 🔄 进行中
 
-待完成：
-- [ ] vm.c 中 walk() 改为 2 级页表
-- [ ] 更新 SATP_SV39 为 SATP_SV32
-- [ ] 更新 CSR 读写函数为 uint32
-- [ ] 修改 trap.c 中 scause 检查值
-- [ ] 编译用户程序
-- [ ] QEMU 运行测试
+**待完成（高优先级）：**
+- [ ] `proc.h`: struct context 所有寄存器改为 uint32
+- [ ] `proc.h`: struct trapframe 改为 32 位
+- [ ] `proc.h`: struct proc 中的 uint64 字段
+- [ ] `proc.c`: 上下文切换、进程创建相关代码
+- [ ] `swtch.S`: 汇编代码改为 32 位指令
+
+### 阶段 3: 陷阱和中断处理 ⏸️ 待开始
+
+**待完成：**
+- [ ] `trap.c`: 修改 scause 检查值（0x8000000000000009 → 0x80000009）
+- [ ] `trap.c`: 所有 uint64 改为 uint32
+- [ ] `trampoline.S`: sd/ld 改为 sw/lw，偏移改为 4 字节
+- [ ] `kernelvec.S`: 同样修改，栈帧 256→128 字节
+
+### 阶段 4: 系统调用和驱动 ⏸️ 待开始
+
+**待完成：**
+- [ ] `syscall.c`, `sysproc.c`, `sysfile.c`: 参数类型
+- [ ] `exec.c`: ELF 处理
+- [ ] `virtio_disk.c`: 保持 64 位描述符，处理地址转换
+- [ ] `plic.c`, `uart.c`: 寄存器访问
+
+### 阶段 5: 用户空间 ⏸️ 待开始
+
+**待完成：**
+- [ ] `usertests.c`: 修复 64 位地址常量（暂时禁用）
+- [ ] `user/printf.c`: 确认 32 位版本工作正常
+- [ ] 重新编译所有用户程序
+
+### 阶段 6: 测试验证 ⏸️ 待开始
+
+**待完成：**
+- [ ] 内核成功启动到 main()
+- [ ] 定时器中断正常工作
+- [ ] 可以创建第一个用户进程
+- [ ] 用户 shell 可以运行
+
+---
+
+## 今日工作记录（2026-03-13）
+
+### 已完成修改
+
+| 文件 | 修改内容 | 状态 |
+|------|----------|------|
+| `kernel/types.h` | uint64 → unsigned long long, pde_t → uint32 | ✅ |
+| `kernel/riscv.h` | 所有 CSR 函数 uint32，Sv32 常量 | ✅ |
+| `kernel/start.c` | w_mepc uint32 转换 | ✅ |
+| `kernel/vm.c` | 2 级页表，1024 PTEs，uint32 类型 | ✅ |
+| `kernel/defs.h` | 函数签名更新 | ✅ |
+| `kernel/kalloc.c` | 部分 uint64 → uint32 | ✅ |
+| `kernel/exec.c` | 部分 uint64 → uint32 | ✅ |
+| `kernel/proc.c` | 部分 uint64 → uint32 | ✅ |
+| `Makefile` | 已配置 rv32gc 和 ilp32 | ✅ |
+
+### 遇到的编译错误及解决
+
+1. **printf.c**: uint64 除法导致 `__umoddi3` 未定义 → 改为 32 位 int
+2. **grind.c**: uint64 循环计数器 → 改为 uint32
+3. **vm.c**: 指针转换错误 → 全面修改函数签名
+4. **defs.h**: 函数声明冲突 → 同步更新所有声明
+
+### 当前阻塞问题
+
+`proc.c` 和 `proc.h` 需要全面修改：
+- `struct context` 和 `struct trapframe` 仍使用 uint64
+- 导致指针转换错误
+- 需要与 `swtch.S`、`trampoline.S` 一起修改
 
 ---
 
