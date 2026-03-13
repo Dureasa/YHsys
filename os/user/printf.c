@@ -12,30 +12,59 @@ putc(int fd, char c)
   write(fd, &c, 1);
 }
 
+// static void
+// printint(int fd, long long xx, int base, int sgn)
+// {
+//   char buf[20];
+//   int i, neg;
+//   unsigned long long x;
+
+//   neg = 0;
+//   if(sgn && xx < 0){
+//     neg = 1;
+//     x = -xx;
+//   } else {
+//     x = xx;
+//   }
+
+//   i = 0;
+//   do{
+//     buf[i++] = digits[x % base];
+//   }while((x /= base) != 0);
+//   if(neg)
+//     buf[i++] = '-';
+
+//   while(--i >= 0)
+//     putc(fd, buf[i]);
+// }
+
 static void
-printint(int fd, long long xx, int base, int sgn)
+printint(int fd, int xx, int base, int sgn)  // 核心：long long → int（32位）
 {
   char buf[20];
   int i, neg;
-  unsigned long long x;
+  uint x;  // 核心：unsigned long long → uint（32位无符号）
 
   neg = 0;
-  if(sgn && xx < 0){
+  if (sgn && xx < 0) {
     neg = 1;
-    x = -xx;
+    x = -xx;  // 32位负数取反，无64位运算
   } else {
     x = xx;
   }
 
   i = 0;
-  do{
-    buf[i++] = digits[x % base];
-  }while((x /= base) != 0);
-  if(neg)
+  do {
+    if (i >= sizeof(buf) - 1) break;  // 增加边界检查，避免越界
+    buf[i++] = digits[x % base];      // 32位取模 → 依赖__umodsi3（工具链默认提供）
+  } while ((x /= base) != 0);         // 32位除法 → 依赖__udivsi3（工具链默认提供）
+  
+  if (neg && i < sizeof(buf) - 1) {
     buf[i++] = '-';
+  }
 
-  while(--i >= 0)
-    putc(fd, buf[i]);
+  while (--i >= 0)
+    putc(fd, buf[i]);  // 确保putc支持fd参数（输出到指定文件描述符）
 }
 
 static void
