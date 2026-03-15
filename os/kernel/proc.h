@@ -1,21 +1,21 @@
 // Saved registers for kernel context switches.
 struct context {
-  uint64 ra;
-  uint64 sp;
+  uint32 ra;
+  uint32 sp;
 
   // callee-saved
-  uint64 s0;
-  uint64 s1;
-  uint64 s2;
-  uint64 s3;
-  uint64 s4;
-  uint64 s5;
-  uint64 s6;
-  uint64 s7;
-  uint64 s8;
-  uint64 s9;
-  uint64 s10;
-  uint64 s11;
+  uint32 s0;
+  uint32 s1;
+  uint32 s2;
+  uint32 s3;
+  uint32 s4;
+  uint32 s5;
+  uint32 s6;
+  uint32 s7;
+  uint32 s8;
+  uint32 s9;
+  uint32 s10;
+  uint32 s11;
 };
 
 // Per-CPU state.
@@ -96,8 +96,8 @@ struct proc {
   struct proc *parent;         // Parent process
 
   // these are private to the process, so p->lock need not be held.
-  uint64 kstack;               // Virtual address of kernel stack
-  uint64 sz;                   // Size of process memory (bytes)
+  uint32 kstack;               // Virtual address of kernel stack
+  uint32 sz;                   // Size of process memory (bytes)
   pagetable_t pagetable;       // User page table
   struct trapframe *trapframe; // data page for trampoline.S
   struct context context;      // swtch() here to run process
