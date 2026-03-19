@@ -49,6 +49,7 @@ TOOLPREFIX := $(shell if riscv64-unknown-elf-objdump -i 2>&1 | grep 'elf64-big' 
 	echo "*** To turn off this error, run 'gmake TOOLPREFIX= ...'." 1>&2; \
 	echo "***" 1>&2; exit 1; fi)
 endif
+$(info $(TOOLPREFIX))
 
 QEMU = qemu-system-riscv32
 MIN_QEMU_VERSION = 7.2
