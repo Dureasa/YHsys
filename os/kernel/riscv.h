@@ -374,6 +374,6 @@ typedef uint32 *pagetable_t; // 1024 PTEs
 #define PX(level, va) ((((uint32) (va)) >> PXSHIFT(level)) & PXMASK)
 
 // one beyond the highest possible virtual address.
-// Sv32: 2-level page table, 10+10+12 bits = 4GB address space
-// MAXVA = 4GB = 0x100000000, but use 0xFFFFFFFF + 1 for clarity
-#define MAXVA (0xFFFFFFFFU + 1U)
+// Sv32 covers 4GB VA space, so keep MAXVA in 64-bit constant form
+// to avoid 32-bit macro overflow to zero.
+#define MAXVA (1ULL << 32)

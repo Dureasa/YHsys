@@ -38,7 +38,7 @@ proc_mapstacks(pagetable_t kpgtbl)
 		char *pa = kalloc();
 		if(pa == 0)
 			panic("kalloc");
-		uint64 va = KSTACK((int) (p - proc));
+		uint32 va = KSTACK((int) (p - proc));
 		kvmmap(kpgtbl, va, (uint32)pa, PGSIZE, PTE_R | PTE_W);
 	}
 }
@@ -143,7 +143,7 @@ found:
 	// Set up new context to start executing at forkret,
 	// which returns to user space.
 	memset(&p->context, 0, sizeof(p->context));
-	p->context.ra = (uint64)forkret;
+	p->context.ra = (uint32)forkret;
 	p->context.sp = p->kstack + PGSIZE;
 
 	return p;
@@ -188,7 +188,7 @@ proc_pagetable(struct proc *p)
 	// only the supervisor uses it, on the way
 	// to/from user space, so not PTE_U.
 	if(mappages(pagetable, TRAMPOLINE, PGSIZE,
-							(uint64)trampoline, PTE_R | PTE_X) < 0){
+							(uint32)trampoline, PTE_R | PTE_X) < 0){
 		uvmfree(pagetable, 0);
 		return 0;
 	}
@@ -196,7 +196,7 @@ proc_pagetable(struct proc *p)
 	// map the trapframe page just below the trampoline page, for
 	// trampoline.S.
 	if(mappages(pagetable, TRAPFRAME, PGSIZE,
-							(uint64)(p->trapframe), PTE_R | PTE_W) < 0){
+							(uint32)(p->trapframe), PTE_R | PTE_W) < 0){
 		uvmunmap(pagetable, TRAMPOLINE, 1, 0);
 		uvmfree(pagetable, 0);
 		return 0;
@@ -532,9 +532,9 @@ forkret(void)
 
 	// return to user space, mimicing usertrap()'s return.
 	prepare_return();
-	uint64 satp = MAKE_SATP(p->pagetable);
-	uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
-	((void (*)(uint64))trampoline_userret)(satp);
+	uint32 satp = MAKE_SATP(p->pagetable);
+	uint32 trampoline_userret = TRAMPOLINE + (uint32)(userret - trampoline);
+	((void (*)(uint32))trampoline_userret)(satp);
 }
 
 // Sleep on channel chan, releasing condition lock lk.
@@ -633,7 +633,7 @@ killed(struct proc *p)
 // depending on usr_dst.
 // Returns 0 on success, -1 on error.
 int
-either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
+either_copyout(int user_dst, uint32 dst, void *src, uint32 len)
 {
 	struct proc *p = myproc();
 	if(user_dst){
@@ -648,7 +648,7 @@ either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
 // depending on usr_src.
 // Returns 0 on success, -1 on error.
 int
-either_copyin(void *dst, int user_src, uint64 src, uint64 len)
+either_copyin(void *dst, int user_src, uint32 src, uint32 len)
 {
 	struct proc *p = myproc();
 	if(user_src){

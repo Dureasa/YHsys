@@ -191,12 +191,14 @@ void
 uvmunmap(pagetable_t pagetable, uint32 va, uint32 npages, int do_free)
 {
   uint32 a;
+  uint32 i;
   pte_t *pte;
 
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
 
-  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+  a = va;
+  for(i = 0; i < npages; i++, a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0) // leaf page table entry allocated?
       continue;
     if((*pte & PTE_V) == 0)  // has physical page been allocated?

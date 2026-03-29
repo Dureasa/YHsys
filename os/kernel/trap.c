@@ -26,7 +26,7 @@ trapinit(void)
 void
 trapinithart(void)
 {
-  w_stvec((uint64)kernelvec);
+  w_stvec((uint32)kernelvec);
 }
 
 //
@@ -34,7 +34,7 @@ trapinithart(void)
 // called from, and returns to, trampoline.S
 // return value is user satp for trampoline.S to switch to.
 //
-uint64
+uint32
 usertrap(void)
 {
   int which_dev = 0;
@@ -44,7 +44,7 @@ usertrap(void)
 
   // send interrupts and exceptions to kerneltrap(),
   // since we're now in the kernel.
-  w_stvec((uint64)kernelvec);  //DOC: kernelvec
+  w_stvec((uint32)kernelvec);  //DOC: kernelvec
 
   struct proc *p = myproc();
   
@@ -72,8 +72,8 @@ usertrap(void)
             vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0) != 0) {
     // page fault on lazily-allocated page
   } else {
-    printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
+    printf("usertrap(): unexpected scause 0x%x pid=%d\n", r_scause(), p->pid);
+    printf("            sepc=0x%x stval=0x%x\n", r_sepc(), r_stval());
     setkilled(p);
   }
 
@@ -87,7 +87,7 @@ usertrap(void)
   prepare_return();
 
   // the user page table to switch to, for trampoline.S
-  uint64 satp = MAKE_SATP(p->pagetable);
+  uint32 satp = MAKE_SATP(p->pagetable);
 
   // return to trampoline.S; satp value in a0.
   return satp;
@@ -107,14 +107,14 @@ prepare_return(void)
   intr_off();
 
   // send syscalls, interrupts, and exceptions to uservec in trampoline.S
-  uint64 trampoline_uservec = TRAMPOLINE + (uservec - trampoline);
+  uint32 trampoline_uservec = TRAMPOLINE + (uint32)(uservec - trampoline);
   w_stvec(trampoline_uservec);
 
   // set up trapframe values that uservec will need when
   // the process next traps into the kernel.
   p->trapframe->kernel_satp = r_satp();         // kernel page table
   p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
-  p->trapframe->kernel_trap = (uint64)usertrap;
+  p->trapframe->kernel_trap = (uint32)usertrap;
   p->trapframe->kernel_hartid = r_tp();         // hartid for cpuid()
 
   // set up the registers that trampoline.S's sret will use
@@ -136,9 +136,9 @@ void
 kerneltrap()
 {
   int which_dev = 0;
-  uint64 sepc = r_sepc();
-  uint64 sstatus = r_sstatus();
-  uint64 scause = r_scause();
+  uint32 sepc = r_sepc();
+  uint32 sstatus = r_sstatus();
+  uint32 scause = r_scause();
   
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");
@@ -147,7 +147,7 @@ kerneltrap()
 
   if((which_dev = devintr()) == 0){
     // interrupt or trap from an unknown source
-    printf("scause=0x%lx sepc=0x%lx stval=0x%lx\n", scause, r_sepc(), r_stval());
+    printf("scause=0x%x sepc=0x%x stval=0x%x\n", scause, r_sepc(), r_stval());
     panic("kerneltrap");
   }
 
@@ -185,9 +185,9 @@ clockintr()
 int
 devintr()
 {
-  uint64 scause = r_scause();
+  uint32 scause = r_scause();
 
-  if(scause == 0x8000000000000009L){
+  if(scause == 0x80000009U){
     // this is a supervisor external interrupt, via PLIC.
 
     // irq indicates which device interrupted.
@@ -208,7 +208,7 @@ devintr()
       plic_complete(irq);
 
     return 1;
-  } else if(scause == 0x8000000000000005L){
+  } else if(scause == 0x80000005U){
     // timer interrupt.
     clockintr();
     return 2;

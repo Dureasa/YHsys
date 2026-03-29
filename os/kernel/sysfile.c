@@ -177,7 +177,7 @@ isdirempty(struct inode *dp)
   struct dirent de;
 
   for(off=2*sizeof(de); off<dp->size; off+=sizeof(de)){
-    if(readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
+    if(readi(dp, 0, (uint32)&de, off, sizeof(de)) != sizeof(de))
       panic("isdirempty: readi");
     if(de.inum != 0)
       return 0;
@@ -220,7 +220,7 @@ sys_unlink(void)
   }
 
   memset(&de, 0, sizeof(de));
-  if(writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
+  if(writei(dp, 0, (uint32)&de, off, sizeof(de)) != sizeof(de))
     panic("unlink: writei");
   if(ip->type == T_DIR){
     dp->nlink--;
@@ -436,7 +436,9 @@ sys_exec(void)
 {
   char path[MAXPATH], *argv[MAXARG];
   int i;
-  uint64 uargv, uarg;
+  uint64 uargv;
+  uint32 uarg;
+  struct proc *p = myproc();
 
   argaddr(1, &uargv);
   if(argstr(0, path, MAXPATH) < 0) {
@@ -447,7 +449,8 @@ sys_exec(void)
     if(i >= NELEM(argv)){
       goto bad;
     }
-    if(fetchaddr(uargv+sizeof(uint64)*i, (uint64*)&uarg) < 0){
+    // RV32 user argv is an array of 32-bit pointers.
+    if(copyin(p->pagetable, (char*)&uarg, uargv + sizeof(uint32) * i, sizeof(uarg)) < 0){
       goto bad;
     }
     if(uarg == 0){
