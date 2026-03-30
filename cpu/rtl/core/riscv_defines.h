@@ -31,7 +31,7 @@
 `define MS_TO_DS_FORWARD_BUS 39
 
     // 异常号定义
-`define EXCP_ILLEGAL_INST 10'b0000000001
+    //`define EXCP_ILLEGAL_INST 10'b0000000001
 
 
 

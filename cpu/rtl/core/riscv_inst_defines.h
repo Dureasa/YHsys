@@ -43,6 +43,9 @@
 `define FUNCT3_CSRRW 3'b001
 `define FUNCT3_CSRRS 3'b010
 `define FUNCT3_CSRRC 3'b011
+`define FUNCT3_CSRRWI 3'b101
+`define FUNCT3_CSRRSI 3'b110
+`define FUNCT3_CSRRCI 3'b111
 
     // 功能码7（funct7）
 `define FUNCT7_SUB 7'b0100000
