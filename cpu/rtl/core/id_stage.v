@@ -40,7 +40,8 @@ module id_stage (
     input  wire                 csr_stall        ,  // CSR访问暂停
     // 分支预测器接口
     input  wire                 bp_taken         ,  // 分支预测跳转
-    input  wire [31:0]          bp_target_pc     ,  // 分支预测目标PC
+    input  wire [31:0]          bp_target_pc        // 分支预测目标PC
+    /*
     // 测试接口（仅核心信号）
     output wire [31:0]          id_test_data1    ,  // 测试用寄存器1数据
     output wire [31:0]          id_test_data2    ,  // 测试用寄存器2数据
@@ -57,6 +58,7 @@ module id_stage (
     output wire                 id_br_inst       ,  // 分支指令标记
     output wire                 id_gr_we         ,  // 通用寄存器写使能
     output wire [4:0]           id_dest          // 目标寄存器地址
+    */
 );
 
 // ====================== 内部寄存器/连线定义 ======================
@@ -365,9 +367,9 @@ always @(*) begin
             gr_we     = 1'b1;
             imm       = imm_i;
             csr_addr_reg  = if_inst_r[31:20];
-            csr_we_reg    = (funct3 != `FUNCT3_CSRRS);
+            csr_we_reg    = (funct3 != `FUNCT3_CSRRS && funct3 != `FUNCT3_CSRRSI);
             // 仅保留合法CSR指令
-            if (funct3 != `FUNCT3_CSRRW && funct3 != `FUNCT3_CSRRS && funct3 != `FUNCT3_CSRRC) begin
+            if (funct3 != `FUNCT3_CSRRW && funct3 != `FUNCT3_CSRRS && funct3 != `FUNCT3_CSRRC && funct3 != `FUNCT3_CSRRWI && funct3 != `FUNCT3_CSRRSI && funct3 != `FUNCT3_CSRRCI) begin
                 illegal_inst = 1'b1;
                 excp_num     = `EXCP_ILLEGAL_INST;
                 excp         = 1'b1;
@@ -441,7 +443,7 @@ assign id_to_es_bus = {
     csr_addr_reg,         // CSR地址 (12)
     csr_rdata             // CSR读数据 (32)
 };
-
+/*
 // 11. 核心输出赋值
 assign id_inst         = if_inst_r;
 assign id_pc           = if_pc_r;
@@ -463,5 +465,6 @@ assign id_test_data1   = rs1_data;
 assign id_test_data2   = rs2_data;
 assign id_test_rd      = rd;
 assign id_test_valid   = id_valid;
+*/
 
 endmodule
