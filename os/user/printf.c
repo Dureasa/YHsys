@@ -12,68 +12,40 @@ putc(int fd, char c)
   write(fd, &c, 1);
 }
 
-// static void
-// printint(int fd, long long xx, int base, int sgn)
-// {
-//   char buf[20];
-//   int i, neg;
-//   unsigned long long x;
-
-//   neg = 0;
-//   if(sgn && xx < 0){
-//     neg = 1;
-//     x = -xx;
-//   } else {
-//     x = xx;
-//   }
-
-//   i = 0;
-//   do{
-//     buf[i++] = digits[x % base];
-//   }while((x /= base) != 0);
-//   if(neg)
-//     buf[i++] = '-';
-
-//   while(--i >= 0)
-//     putc(fd, buf[i]);
-// }
-
 static void
-printint(int fd, int xx, int base, int sgn)  // 核心：long long → int（32位）
+printint(int fd, int xx, int base, int sgn)
 {
-  char buf[20];
+  char buf[16];
   int i, neg;
-  uint x;  // 核心：unsigned long long → uint（32位无符号）
+  uint x;
 
   neg = 0;
-  if (sgn && xx < 0) {
+  if(sgn && xx < 0){
     neg = 1;
-    x = -xx;  // 32位负数取反，无64位运算
+    x = -xx;
   } else {
     x = xx;
   }
 
   i = 0;
-  do {
-    if (i >= sizeof(buf) - 1) break;  // 增加边界检查，避免越界
-    buf[i++] = digits[x % base];      // 32位取模 → 依赖__umodsi3（工具链默认提供）
-  } while ((x /= base) != 0);         // 32位除法 → 依赖__udivsi3（工具链默认提供）
-  
-  if (neg && i < sizeof(buf) - 1) {
+  do{
+    buf[i++] = digits[x % base];
+  }while((x /= base) != 0);
+  if(neg)
     buf[i++] = '-';
-  }
 
-  while (--i >= 0)
-    putc(fd, buf[i]);  // 确保putc支持fd参数（输出到指定文件描述符）
+  while(--i >= 0)
+    putc(fd, buf[i]);
 }
 
 static void
-printptr(int fd, uint64 x) {
+printptr(int fd, uint32 x)
+{
   int i;
   putc(fd, '0');
   putc(fd, 'x');
-  for (i = 0; i < (sizeof(uint64) * 2); i++, x <<= 4)
-    putc(fd, digits[x >> (sizeof(uint64) * 8 - 4)]);
+  for(i = 0; i < (sizeof(uint32) * 2); i++, x <<= 4)
+    putc(fd, digits[x >> (sizeof(uint32) * 8 - 4)]);
 }
 
 // Print to the given fd. Only understands %d, %x, %p, %c, %s.
@@ -99,31 +71,31 @@ vprintf(int fd, const char *fmt, va_list ap)
       if(c0 == 'd'){
         printint(fd, va_arg(ap, int), 10, 1);
       } else if(c0 == 'l' && c1 == 'd'){
-        printint(fd, va_arg(ap, uint64), 10, 1);
+        printint(fd, va_arg(ap, int), 10, 1);
         i += 1;
       } else if(c0 == 'l' && c1 == 'l' && c2 == 'd'){
-        printint(fd, va_arg(ap, uint64), 10, 1);
+        printint(fd, va_arg(ap, int), 10, 1);
         i += 2;
       } else if(c0 == 'u'){
-        printint(fd, va_arg(ap, uint32), 10, 0);
+        printint(fd, va_arg(ap, uint), 10, 0);
       } else if(c0 == 'l' && c1 == 'u'){
-        printint(fd, va_arg(ap, uint64), 10, 0);
+        printint(fd, va_arg(ap, uint), 10, 0);
         i += 1;
       } else if(c0 == 'l' && c1 == 'l' && c2 == 'u'){
-        printint(fd, va_arg(ap, uint64), 10, 0);
+        printint(fd, va_arg(ap, uint), 10, 0);
         i += 2;
       } else if(c0 == 'x'){
-        printint(fd, va_arg(ap, uint32), 16, 0);
+        printint(fd, va_arg(ap, uint), 16, 0);
       } else if(c0 == 'l' && c1 == 'x'){
-        printint(fd, va_arg(ap, uint64), 16, 0);
+        printint(fd, va_arg(ap, uint), 16, 0);
         i += 1;
       } else if(c0 == 'l' && c1 == 'l' && c2 == 'x'){
-        printint(fd, va_arg(ap, uint64), 16, 0);
+        printint(fd, va_arg(ap, uint), 16, 0);
         i += 2;
       } else if(c0 == 'p'){
-        printptr(fd, va_arg(ap, uint64));
+        printptr(fd, (uint32)(uint)va_arg(ap, void*));
       } else if(c0 == 'c'){
-        putc(fd, va_arg(ap, uint32));
+        putc(fd, va_arg(ap, int));
       } else if(c0 == 's'){
         if((s = va_arg(ap, char*)) == 0)
           s = "(null)";

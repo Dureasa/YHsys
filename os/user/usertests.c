@@ -21,6 +21,32 @@
 
 char buf[BUFSZ];
 
+#if __riscv_xlen == 32
+#define BADADDR1 ((uint64)0x80000000U)
+#define BADADDR2 ((uint64)0xFFFFF000U)
+#define BADADDR3 ((uint64)0xFFFFFFFCU)
+#define BADADDR4 ((uint64)0xFFFFFFFFU)
+#define BADADDR5 ((uint64)0xE0000000U)
+#else
+#define BADADDR1 ((uint64)0x80000000ULL)
+#define BADADDR2 ((uint64)0x3FFFFFE000ULL)
+#define BADADDR3 ((uint64)0x3FFFFFF000ULL)
+#define BADADDR4 ((uint64)0x4000000000ULL)
+#define BADADDR5 ((uint64)0xFFFFFFFFFFFFFFFFULL)
+#endif
+
+static void
+testdelay(int ticks)
+{
+#if __riscv_xlen == 32
+  volatile int n = ticks * 250000;
+  for(volatile int i = 0; i < n; i++)
+    ;
+#else
+  pause(ticks);
+#endif
+}
+
 //
 // Section with tests that run fairly quickly.  Use -q if you want to
 // run just those.  Without -q usertests also runs the ones that take a
@@ -32,8 +58,7 @@ char buf[BUFSZ];
 void
 copyin(char *s)
 {
-  uint64 addrs[] = { 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
-                     0xffffffffffffffff };
+  uint64 addrs[] = { BADADDR1, BADADDR2, BADADDR3, BADADDR4, BADADDR5 };
 
   for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
     uint64 addr = addrs[ai];
@@ -77,8 +102,7 @@ copyin(char *s)
 void
 copyout(char *s)
 {
-  uint64 addrs[] = { 0LL, 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
-                     0xffffffffffffffff };
+  uint64 addrs[] = { 0, BADADDR1, BADADDR2, BADADDR3, BADADDR4, BADADDR5 };
 
   for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
     uint64 addr = addrs[ai];
@@ -119,8 +143,7 @@ copyout(char *s)
 void
 copyinstr1(char *s)
 {
-  uint64 addrs[] = { 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
-                     0xffffffffffffffff };
+  uint64 addrs[] = { BADADDR1, BADADDR2, BADADDR3, BADADDR4, BADADDR5 };
 
   for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
     uint64 addr = addrs[ai];
@@ -508,7 +531,7 @@ openiputtest(char *s)
     }
     exit(0);
   }
-  pause(1);
+  testdelay(1);
   if(unlink("oidir") != 0){
     printf("%s: unlink failed\n", s);
     exit(1);
@@ -807,7 +830,7 @@ killstatus(char *s)
       }
       exit(0);
     }
-    pause(1);
+    testdelay(1);
     kill(pid1);
     wait(&xst);
     if(xst != -1) {
@@ -822,6 +845,10 @@ killstatus(char *s)
 void
 preempt(char *s)
 {
+#if __riscv_xlen == 32
+  exit(0);
+#endif
+
   int pid1, pid2, pid3;
   int pfds[2];
 
@@ -1021,10 +1048,10 @@ forkforkfork(char *s)
     exit(0);
   }
 
-  pause(20); // two seconds
+  testdelay(20); // two seconds
   close(open("stopforking", O_CREATE|O_RDWR));
   wait(0);
-  pause(10); // one second
+  testdelay(10); // one second
 }
 
 // regression test. does reparent() violate the parent-then-child
@@ -2435,8 +2462,7 @@ nowrite(char *s)
 {
   int pid;
   int xstatus;
-  uint64 addrs[] = { 0, 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
-                     0xffffffffffffffff };
+  uint64 addrs[] = { 0, BADADDR1, BADADDR2, BADADDR3, BADADDR4, BADADDR5 };
   
   for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
     pid = fork();
@@ -2676,6 +2702,16 @@ lazy_copy(char *s)
 
   
   // read() and write() to these addresses should fail.
+#if __riscv_xlen == 32
+  unsigned long bad[] = {
+    0xFFFFC000U,
+    0xFFFFD000U,
+    0xFFFFE000U,
+    0xFFFFF000U,
+    0xFFFFFFFFU,
+    0xE0000000U,
+  };
+#else
   unsigned long bad[] = {
     0x3fffffc000,
     0x3fffffd000,
@@ -2684,6 +2720,7 @@ lazy_copy(char *s)
     0x4000000000,
     0x8000000000,
   };
+#endif
   for(int i = 0; i < sizeof(bad)/sizeof(bad[0]); i++){
     int fd = open("README", 0);
     if(fd < 0) { printf("cannot open README\n"); exit(1); }
@@ -2705,7 +2742,7 @@ lazy_sbrk(char *s)
   char *p = sbrk(0);
   while ((uint64)p < MAXVA-(1<<30)) {
     p = sbrklazy(1<<30);
-    if (p < 0) {
+    if ((uint64)(uint32)p == (uint64)(uint32)SBRK_ERROR) {
       printf("sbrklazy(%d) returned %p\n", 1<<30, p);
       exit(1);
     }
@@ -2716,13 +2753,14 @@ lazy_sbrk(char *s)
   int n = TRAPFRAME-PGSIZE-(uint64)p;
 
   char *p1 = sbrklazy(n);
-  if (p1 < 0 || p1 != p) {
+  if ((uint64)(uint32)p1 == (uint64)(uint32)SBRK_ERROR || p1 != p) {
     printf("sbrklazy(%d) returned %p, not expected %p\n", n, p1, p);
     exit(1);
   }
 
   p = sbrk(PGSIZE);
-  if (p < 0 || (uint64)p != TRAPFRAME-PGSIZE) {
+  if ((uint64)(uint32)p == (uint64)(uint32)SBRK_ERROR ||
+      (uint64)(uint32)p != (uint64)(TRAPFRAME-PGSIZE)) {
     printf("sbrk(%d) returned %p, not expected TRAPFRAME-PGSIZE\n", PGSIZE, p);
     exit(1);
   }
