@@ -360,6 +360,7 @@ typedef uint32 *pagetable_t; // 1024 PTEs
 #define PTE_W (1U << 2)
 #define PTE_X (1U << 3)
 #define PTE_U (1U << 4) // user can access
+#define PTE_COW (1U << 8) // copy-on-write mapping
 
 // shift a physical address to the right place for a PTE.
 #define PA2PTE(pa) ((((uint32)pa) >> 12) << 10)

@@ -299,23 +299,28 @@ uvmcopy(pagetable_t old, pagetable_t new, uint32 sz)
   pte_t *pte;
   uint32 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       continue;   // page table entry hasn't been allocated
     if((*pte & PTE_V) == 0)
       continue;   // physical page hasn't been allocated
+
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)(uint32)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint32)mem, flags) != 0){
-      kfree(mem);
+
+    if(flags & PTE_W){
+      flags = (flags & ~PTE_W) | PTE_COW;
+      *pte = PA2PTE(pa) | flags;
+    }
+
+    kaddref(pa);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      kfree((void*)pa);
       goto err;
     }
   }
+  sfence_vma();
   return 0;
 
  err:
@@ -350,11 +355,17 @@ copyout(pagetable_t pagetable, uint32 dstva, char *src, uint32 len)
     if(va0 >= MAXVA)
       return -1;
 
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0) {
+    pte = walk(pagetable, va0, 0);
+    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0) {
       if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
         return -1;
       }
+    } else if((*pte & PTE_COW) != 0) {
+      if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
+        return -1;
+      }
+    } else {
+      pa0 = PTE2PA(*pte);
     }
 
     pte = walk(pagetable, va0, 0);
@@ -452,15 +463,38 @@ copyinstr(pagetable_t pagetable, char *dst, uint32 srcva, uint32 max)
 uint32
 vmfault(pagetable_t pagetable, uint32 va, int read)
 {
-  uint32 mem;
+  uint32 mem, pa;
+  pte_t *pte;
+  uint flags;
   struct proc *p = myproc();
 
   if (va >= p->sz)
     return 0;
   va = PGROUNDDOWN(va);
-  if(ismapped(pagetable, va)) {
-    return 0;
+
+  pte = walk(pagetable, va, 0);
+  if(pte && (*pte & PTE_V)){
+    // Write fault on a COW page: allocate a private writable copy.
+    if(((*pte & PTE_COW) == 0) || read)
+      return 0;
+
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+
+    mem = (uint32)kalloc();
+    if(mem == 0)
+      return 0;
+
+    memmove((void*)mem, (void*)(uint32)pa, PGSIZE);
+    *pte = PA2PTE(mem) | ((flags | PTE_W) & ~PTE_COW);
+    sfence_vma();
+    kfree((void*)pa);
+    return mem;
   }
+
+  if(ismapped(pagetable, va))
+    return 0;
+
   mem = (uint32)kalloc();
   if(mem == 0)
     return 0;
