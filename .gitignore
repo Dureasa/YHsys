@@ -22,3 +22,6 @@ os/mkfs/mkfs
 os/.gdbinit
 
 core.*
+
+.vscode/
+.claude/
