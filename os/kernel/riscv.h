@@ -1,14 +1,5 @@
 #ifndef __ASSEMBLER__
 
-// which hart (core) is this?
-static inline uint32
-r_mhartid()
-{
-  uint32 x;
-  asm volatile("csrr %0, mhartid" : "=r" (x) );
-  return x;
-}
-
 // Machine Status Register, mstatus
 
 #define MSTATUS_MPP_MASK (3U << 11) // previous mode.
@@ -310,22 +301,6 @@ r_sp()
   uint32 x;
   asm volatile("mv %0, sp" : "=r" (x) );
   return x;
-}
-
-// read and write tp, the thread pointer, which xv6 uses to hold
-// this core's hartid (core number), the index into cpus[].
-static inline uint32
-r_tp()
-{
-  uint32 x;
-  asm volatile("mv %0, tp" : "=r" (x) );
-  return x;
-}
-
-static inline void
-w_tp(uint32 x)
-{
-  asm volatile("mv tp, %0" : : "r" (x));
 }
 
 static inline uint32

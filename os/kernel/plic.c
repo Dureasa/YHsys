@@ -19,22 +19,19 @@ plicinit(void)
 void
 plicinithart(void)
 {
-  int hart = cpuid();
-  
-  // set enable bits for this hart's S-mode
+  // set enable bits for hart0 S-mode
   // for the uart and virtio disk.
-  *(uint32*)PLIC_SENABLE(hart) = (1 << UART0_IRQ) | (1 << VIRTIO0_IRQ);
+  *(uint32*)PLIC_SENABLE(0) = (1 << UART0_IRQ) | (1 << VIRTIO0_IRQ);
 
-  // set this hart's S-mode priority threshold to 0.
-  *(uint32*)PLIC_SPRIORITY(hart) = 0;
+  // set hart0 S-mode priority threshold to 0.
+  *(uint32*)PLIC_SPRIORITY(0) = 0;
 }
 
 // ask the PLIC what interrupt we should serve.
 int
 plic_claim(void)
 {
-  int hart = cpuid();
-  int irq = *(uint32*)PLIC_SCLAIM(hart);
+  int irq = *(uint32*)PLIC_SCLAIM(0);
   return irq;
 }
 
@@ -42,6 +39,5 @@ plic_claim(void)
 void
 plic_complete(int irq)
 {
-  int hart = cpuid();
-  *(uint32*)PLIC_SCLAIM(hart) = irq;
+  *(uint32*)PLIC_SCLAIM(0) = irq;
 }

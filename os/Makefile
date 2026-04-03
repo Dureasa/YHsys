@@ -149,8 +149,8 @@ UPROGS=\
 	$U/_forphan\
 	$U/_dorphan\
 
-fs.img: mkfs/mkfs README.md $(UPROGS)
-	mkfs/mkfs fs.img README.md $(UPROGS)
+fs.img: mkfs/mkfs README $(UPROGS)
+	mkfs/mkfs fs.img README $(UPROGS)
 
 -include kernel/*.d user/*.d
 
@@ -169,7 +169,7 @@ QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
 	then echo "-gdb tcp::$(GDBPORT)"; \
 	else echo "-s -p $(GDBPORT)"; fi)
 ifndef CPUS
-CPUS := 2
+CPUS := 1
 endif
 
 QEMUOPTS = -machine virt -bios none -kernel $K/kernel -m 128M -smp $(CPUS) -nographic

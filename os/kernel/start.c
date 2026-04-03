@@ -7,8 +7,8 @@
 void main();
 void timerinit();
 
-// entry.S needs one stack per CPU.
-__attribute__ ((aligned (16))) char stack0[4096 * NCPU];
+// entry.S uses a single boot stack in UP mode.
+__attribute__ ((aligned (16))) char stack0[4096];
 
 // entry.S jumps here in machine mode on stack0.
 void
@@ -40,15 +40,11 @@ start()
   // ask for clock interrupts.
   timerinit();
 
-  // keep each CPU's hartid in its tp register, for cpuid().
-  int id = r_mhartid();
-  w_tp(id);
-
   // switch to supervisor mode and jump to main().
   asm volatile("mret");
 }
 
-// ask each hart to generate timer interrupts.
+// configure timer interrupts for the single boot CPU.
 void
 timerinit()
 {

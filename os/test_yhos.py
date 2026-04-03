@@ -22,7 +22,7 @@ class QEMU(object):
         if reset:
             self.build_xv6()
             self.reset_fs()
-        cpus = os.environ.get("CPUS", "3")
+        cpus = os.environ.get("CPUS", "1")
         q = [
             "qemu-system-riscv32",
             "-machine", "virt",
@@ -108,7 +108,7 @@ class QEMU(object):
         return self.output.splitlines()
 
     def error(self):
-        print("FAIL: match failed", regexps)
+        print("FAIL: match failed")
         self.save_output()
         self.stop()
         sys.exit(1)

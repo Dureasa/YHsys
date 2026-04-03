@@ -6,7 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
-struct cpu cpus[NCPU];
+struct cpu bootcpu;
 
 struct proc proc[NPROC];
 
@@ -64,8 +64,7 @@ procinit(void)
 int
 cpuid()
 {
-	int id = r_tp();
-	return id;
+	return 0;
 }
 
 // Return this CPU's cpu struct.
@@ -73,9 +72,7 @@ cpuid()
 struct cpu*
 mycpu(void)
 {
-	int id = cpuid();
-	struct cpu *c = &cpus[id];
-	return c;
+	return &bootcpu;
 }
 
 // Return the current struct proc *, or zero if none.
