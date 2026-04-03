@@ -26,6 +26,67 @@ extern char trampoline[]; // trampoline.S
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
+static uint32 mlfq_seq = 1;
+static int mlfq_need_boost = 0;
+
+static int
+mlfq_quantum(int level)
+{
+	if(level <= 0)
+		return MLFQ_Q0_SLICE;
+	if(level == 1)
+		return MLFQ_Q1_SLICE;
+	return MLFQ_Q2_SLICE;
+}
+
+static void
+mlfq_reset_proc(struct proc *p)
+{
+	p->mlfq_level = 0;
+	p->mlfq_ticks_used = 0;
+	p->mlfq_stamp = 0;
+}
+
+void
+mlfq_mark_boost(void)
+{
+	mlfq_need_boost = 1;
+}
+
+void
+mlfq_tick(void)
+{
+	struct proc *p = myproc();
+
+	if(p == 0)
+		return;
+
+	if(p->state != RUNNING)
+		return;
+
+	p->mlfq_ticks_used++;
+	if(p->mlfq_ticks_used >= mlfq_quantum(p->mlfq_level)){
+		p->mlfq_ticks_used = 0;
+		if(p->mlfq_level < MLFQ_LEVELS - 1)
+			p->mlfq_level++;
+	}
+}
+
+static void
+mlfq_boost_all(void)
+{
+	struct proc *p;
+
+	for(p = proc; p < &proc[NPROC]; p++){
+		acquire(&p->lock);
+		if(p->state != UNUSED){
+			p->mlfq_level = 0;
+			p->mlfq_ticks_used = 0;
+		}
+		release(&p->lock);
+	}
+}
+
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -121,6 +182,7 @@ allocproc(void)
 found:
 	p->pid = allocpid();
 	p->state = USED;
+	mlfq_reset_proc(p);
 
 	// Allocate a trapframe page.
 	if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -165,6 +227,9 @@ freeproc(struct proc *p)
 	p->chan = 0;
 	p->killed = 0;
 	p->xstate = 0;
+	p->mlfq_level = 0;
+	p->mlfq_ticks_used = 0;
+	p->mlfq_stamp = 0;
 	p->state = UNUSED;
 }
 
@@ -275,6 +340,9 @@ kfork(void)
 
 	// copy saved user registers.
 	*(np->trapframe) = *(p->trapframe);
+	np->mlfq_level = 0;
+	np->mlfq_ticks_used = 0;
+	np->mlfq_stamp = 0;
 
 	// Cause fork to return 0 in the child.
 	np->trapframe->a0 = 0;
@@ -434,25 +502,39 @@ scheduler(void)
 		intr_on();
 		intr_off();
 
-		int found = 0;
+		if(mlfq_need_boost){
+			mlfq_need_boost = 0;
+			mlfq_boost_all();
+		}
+
+		struct proc *best = 0;
+		int best_level = MLFQ_LEVELS;
+		uint32 best_stamp = 0xffffffff;
+
 		for(p = proc; p < &proc[NPROC]; p++) {
 			acquire(&p->lock);
-			if(p->state == RUNNABLE) {
-				// Switch to chosen process.  It is the process's job
-				// to release its lock and then reacquire it
-				// before jumping back to us.
-				p->state = RUNNING;
-				c->proc = p;
-				swtch(&c->context, &p->context);
-
-				// Process is done running for now.
-				// It should have changed its p->state before coming back.
-				c->proc = 0;
-				found = 1;
+			if(p->state == RUNNABLE){
+				if(p->mlfq_level < best_level ||
+				   (p->mlfq_level == best_level && p->mlfq_stamp < best_stamp)){
+					if(best)
+						release(&best->lock);
+					best = p;
+					best_level = p->mlfq_level;
+					best_stamp = p->mlfq_stamp;
+					continue;
+				}
 			}
 			release(&p->lock);
 		}
-		if(found == 0) {
+
+		if(best) {
+			best->state = RUNNING;
+			best->mlfq_stamp = ++mlfq_seq;
+			c->proc = best;
+			swtch(&c->context, &best->context);
+			c->proc = 0;
+			release(&best->lock);
+		} else {
 			// nothing to run; stop running on this core until an interrupt.
 			asm volatile("wfi");
 		}
@@ -488,10 +570,15 @@ sched(void)
 
 // Give up the CPU for one scheduling round.
 void
-yield(void)
+yield(int from_timer)
 {
 	struct proc *p = myproc();
 	acquire(&p->lock);
+	if(!from_timer){
+		if(p->mlfq_level > 0)
+			p->mlfq_level--;
+		p->mlfq_ticks_used = 0;
+	}
 	p->state = RUNNABLE;
 	sched();
 	release(&p->lock);
@@ -553,6 +640,9 @@ sleep(void *chan, struct spinlock *lk)
 
 	// Go to sleep.
 	p->chan = chan;
+	if(p->mlfq_level > 0)
+		p->mlfq_level--;
+	p->mlfq_ticks_used = 0;
 	p->state = SLEEPING;
 
 	sched();

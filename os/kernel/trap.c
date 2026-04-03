@@ -82,7 +82,7 @@ usertrap(void)
 
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
-    yield();
+    yield(1);
 
   prepare_return();
 
@@ -153,7 +153,7 @@ kerneltrap()
 
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2 && myproc() != 0)
-    yield();
+    yield(1);
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.
@@ -164,10 +164,17 @@ kerneltrap()
 void
 clockintr()
 {
+  uint now;
+
   acquire(&tickslock);
   ticks++;
+  now = ticks;
   wakeup(&ticks);
   release(&tickslock);
+
+  mlfq_tick();
+  if((now % MLFQ_BOOST_TICKS) == 0)
+    mlfq_mark_boost();
 
   // ask for the next timer interrupt. this also clears
   // the interrupt request. 1000000 is about a tenth

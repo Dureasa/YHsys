@@ -103,5 +103,8 @@ struct proc {
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
+  int mlfq_level;              // MLFQ queue level: 0 highest
+  int mlfq_ticks_used;         // Ticks consumed in current level
+  uint32 mlfq_stamp;           // Round-robin stamp inside level
   char name[16];               // Process name (debugging)
 };

@@ -8,6 +8,69 @@
 #include "elf.h"
 
 static int loadseg(pde_t *, uint32, struct inode *, uint, uint);
+static int allocseg(pagetable_t, uint32, uint32, int);
+
+static uint32 aslr_state = 0x9e3779b9;
+
+static uint32
+aslr_next(void)
+{
+  uint32 x;
+
+  aslr_state ^= r_time() + 0x7f4a7c15;
+  x = aslr_state;
+  x ^= x << 13;
+  x ^= x >> 17;
+  x ^= x << 5;
+  aslr_state = x;
+  return x;
+}
+
+static uint32
+aslr_pages(uint32 max_pages)
+{
+  if(max_pages == 0)
+    return 0;
+  return aslr_next() % (max_pages + 1);
+}
+
+static int
+allocseg(pagetable_t pagetable, uint32 va, uint32 sz, int perm)
+{
+  uint32 a, last;
+  char *mem;
+  pte_t *pte;
+
+  if(sz == 0)
+    return 0;
+
+  a = va;
+  last = PGROUNDDOWN(va + sz - 1);
+  for(;;){
+    pte = walk(pagetable, a, 0);
+    if(pte && (*pte & PTE_V)){
+      *pte |= (PTE_R | PTE_U | perm);
+      if(a == last)
+        break;
+      a += PGSIZE;
+      continue;
+    }
+
+    mem = kalloc();
+    if(mem == 0)
+      return -1;
+    memset(mem, 0, PGSIZE);
+    if(mappages(pagetable, a, PGSIZE, (uint32)mem, PTE_R | PTE_U | perm) != 0){
+      kfree(mem);
+      return -1;
+    }
+    if(a == last)
+      break;
+    a += PGSIZE;
+  }
+
+  return 0;
+}
 
 // map ELF permissions to PTE permission bits.
 int flags2perm(int flags)
@@ -29,6 +92,8 @@ kexec(char *path, char **argv)
   char *s, *last;
   int i, off;
   uint32 argc, sz = 0, sp, ustack[MAXARG], stackbase;
+  uint32 code_jitter;
+  char *jitter_pages[ASLR_CODE_MAX_PAGES] = {0};
   struct elfhdr elf;
   struct inode *ip;
   struct proghdr ph;
@@ -55,25 +120,49 @@ kexec(char *path, char **argv)
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
 
+  // Randomize physical placement of code pages without breaking
+  // fixed-link user binaries that assume a low virtual text base.
+  code_jitter = aslr_pages(ASLR_CODE_MAX_PAGES);
+  for(i = 0; i < code_jitter; i++){
+    jitter_pages[i] = kalloc();
+    if(jitter_pages[i] == 0)
+      break;
+  }
+
   // Load program into memory.
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
+    uint32 segva;
+    uint32 segend;
+
     if(readi(ip, 0, (uint32)&ph, off, sizeof(ph)) != sizeof(ph))
       goto bad;
     if(ph.type != ELF_PROG_LOAD)
       continue;
     if(ph.memsz < ph.filesz)
       goto bad;
-    if(ph.vaddr + ph.memsz < ph.vaddr)
+    segva = ph.vaddr;
+    segend = segva + ph.memsz;
+    if(segend < segva)
       goto bad;
-    if(ph.vaddr % PGSIZE != 0)
+    if(segend >= TRAPFRAME)
       goto bad;
-    uint64 sz1;
-    if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags))) == 0)
+    if(segva % PGSIZE != 0)
       goto bad;
-    sz = sz1;
-    if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
+    if(allocseg(pagetable, segva, ph.memsz, flags2perm(ph.flags)) < 0)
+      goto bad;
+    if(segend > sz)
+      sz = segend;
+    if(loadseg(pagetable, segva, ip, ph.off, ph.filesz) < 0)
       goto bad;
   }
+
+  for(i = 0; i < ASLR_CODE_MAX_PAGES; i++){
+    if(jitter_pages[i]){
+      kfree(jitter_pages[i]);
+      jitter_pages[i] = 0;
+    }
+  }
+
   iunlockput(ip);
   end_op();
   ip = 0;
@@ -85,13 +174,23 @@ kexec(char *path, char **argv)
   // Make the first inaccessible as a stack guard.
   // Use the rest as the user stack.
   sz = PGROUNDUP(sz);
+  uint32 stack_gap = aslr_pages(ASLR_STACK_GAP_MAX_PAGES) * PGSIZE;
+  uint32 stack_end = sz + stack_gap + (USERSTACK+1)*PGSIZE;
+  if(stack_end < sz || stack_end >= TRAPFRAME)
+    goto bad;
+
   uint32 sz1;
-  if((sz1 = uvmalloc(pagetable, sz, sz + (USERSTACK+1)*PGSIZE, PTE_W)) == 0)
+  if((sz1 = uvmalloc(pagetable, sz, stack_end, PTE_W)) == 0)
     goto bad;
   sz = sz1;
   uvmclear(pagetable, sz-(USERSTACK+1)*PGSIZE);
   sp = sz;
   stackbase = sp - USERSTACK*PGSIZE;
+
+  uint32 heap_gap = aslr_pages(ASLR_HEAP_GAP_MAX_PAGES) * PGSIZE;
+  if(sz + heap_gap < sz || sz + heap_gap >= TRAPFRAME)
+    goto bad;
+  sz += heap_gap;
 
   // Copy argument strings into new stack, remember their
   // addresses in ustack[].
@@ -127,6 +226,9 @@ kexec(char *path, char **argv)
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
     
+  if(elf.entry >= TRAPFRAME)
+    goto bad;
+
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
@@ -138,6 +240,12 @@ kexec(char *path, char **argv)
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:
+  for(i = 0; i < ASLR_CODE_MAX_PAGES; i++){
+    if(jitter_pages[i]){
+      kfree(jitter_pages[i]);
+      jitter_pages[i] = 0;
+    }
+  }
   if(pagetable)
     proc_freepagetable(pagetable, sz);
   if(ip){

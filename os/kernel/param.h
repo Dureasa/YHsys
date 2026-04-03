@@ -13,3 +13,15 @@
 #define MAXPATH      128   // maximum file path name
 #define USERSTACK    1     // user stack pages
 
+// ASLR randomization window sizes (in pages).
+#define ASLR_CODE_MAX_PAGES      2
+#define ASLR_STACK_GAP_MAX_PAGES 1
+#define ASLR_HEAP_GAP_MAX_PAGES  0
+
+// MLFQ scheduler configuration.
+#define MLFQ_LEVELS      3
+#define MLFQ_Q0_SLICE    1
+#define MLFQ_Q1_SLICE    2
+#define MLFQ_Q2_SLICE    4
+#define MLFQ_BOOST_TICKS 64
+
