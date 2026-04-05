@@ -3,7 +3,7 @@
 #include "kernel/fcntl.h"
 #include "user/user.h"
 
-// Create an orphaned file and check if test-xv6.py recovers it.
+// Create an orphaned file and check if test_yhos.py recovers it.
 
 #define BUFSZ 500
 

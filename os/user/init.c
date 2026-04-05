@@ -24,15 +24,15 @@ main(void)
   dup(0);  // stderr
 
   for(;;){
-    printf("init: starting sh\n");
+    printf("YHsys init: starting sh\n");
     pid = fork();
     if(pid < 0){
-      printf("init: fork failed\n");
+      printf("YHsys init: fork failed\n");
       exit(1);
     }
     if(pid == 0){
       exec("sh", argv);
-      printf("init: exec sh failed\n");
+      printf("YHsys init: exec sh failed\n");
       exit(1);
     }
 
@@ -44,7 +44,7 @@ main(void)
         // the shell exited; restart it.
         break;
       } else if(wpid < 0){
-        printf("init: wait returned an error\n");
+        printf("YHsys init: wait returned an error\n");
         exit(1);
       } else {
         // it was a parentless process; do nothing.

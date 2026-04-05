@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
 #
-# python script that tests xv6 without having to boot it and type to its shell
+# python script that tests YHsys-OS in QEMU without manual shell typing
 #
-# ./test-xv6.py usertests  (runs usertests)
-# ./test-xv6.py -q usertests (runs the quick tests of usertests)
-# ./test-xv6.py crash  (runs the crash tests)
-# ./test-xv6.py log (runs the log crash test)
+# ./test_yhos.py usertests  (runs usertests)
+# ./test_yhos.py -q usertests (runs the quick tests of usertests)
+# ./test_yhos.py crash  (runs the crash tests)
+# ./test_yhos.py log (runs the log crash test)
 
 import argparse, os, inspect, pty, re, select, signal, subprocess, sys, time
 from subprocess import run
@@ -20,7 +20,7 @@ class QEMU(object):
 
     def __init__(self, reset=False):
         if reset:
-            self.build_xv6()
+            self.build_kernel()
             self.reset_fs()
         cpus = os.environ.get("CPUS", "1")
         q = [
@@ -51,7 +51,7 @@ class QEMU(object):
         except subprocess.CalledProcessError as e:
             print(f"Command failed with exit code {e.returncode}")
 
-    def build_xv6(self):
+    def build_kernel(self):
         try:
             run(["make", "kernel/kernel"], check=True)
         except subprocess.CalledProcessError as e:
@@ -59,7 +59,7 @@ class QEMU(object):
 
     def save_output(self):
         try:
-            with open("test-xv6.out", "w") as f:
+            with open("test-yhsys.out", "w") as f:
                 f.write(self.output)
         except OSError as e:
             print("Provided a bad results path. Error:", e)
@@ -143,7 +143,7 @@ class QEMU(object):
 
 def crash_log():
     q = QEMU(True)
-    q.monitor('^\\$ ', progress='^xv6|^hart|^init', timeout=30)
+    q.monitor('^YHsys> ', progress='^YHsys|^hart', timeout=30)
     time.sleep(1)
     q.cmd("logstress f0 f1 f2 f3 f4 f5\n")
     time.sleep(2)
@@ -165,7 +165,7 @@ def recover_log():
 
 def forphan():
     q = QEMU(True)
-    q.monitor('^\\$ ', progress='^xv6|^hart|^init', timeout=30)
+    q.monitor('^YHsys> ', progress='^YHsys|^hart', timeout=30)
     time.sleep(1)
     q.cmd("forphan\n")
     time.sleep(5)
@@ -176,7 +176,7 @@ def forphan():
 
 def dorphan():
     q = QEMU(True)
-    q.monitor('^\\$ ', progress='^xv6|^hart|^init', timeout=30)
+    q.monitor('^YHsys> ', progress='^YHsys|^hart', timeout=30)
     time.sleep(1)
     q.cmd("dorphan\n")
     time.sleep(5)
@@ -230,7 +230,7 @@ def test_usertests(test=""):
     elif test != "":
         opt += " " + test
     q = QEMU(True)
-    q.monitor('^\\$ ', progress='^xv6|^hart|^init', timeout=30)
+    q.monitor('^YHsys> ', progress='^YHsys|^hart', timeout=30)
     time.sleep(1)
     q.cmd("usertests" + opt + "\n")
     q.monitor('^ALL TESTS PASSED', progress='test', timeout=timeout)
