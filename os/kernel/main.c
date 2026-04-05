@@ -11,7 +11,8 @@ main()
   consoleinit();
   printfinit();
   printf("\n");
-  printf("xv6 kernel is booting\n");
+  printf("YHsys RV32-UP kernel booting\n");
+  printf("YHsys: Sv32 + COW + LazyAlloc + UP\n");
   printf("\n");
   kinit();         // physical page allocator
   kvminit();       // create kernel page table

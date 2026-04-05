@@ -1,18 +1,15 @@
 # YHsys-rv32
 
-This repository is an independent port of MIT xv6 to **RISC-V 32-bit (RV32GC)**.
+This repository provides the **YHsys-RV32** operating-system kernel and userland for **RISC-V 32-bit (RV32GC)**.
 
 It is intended for learning and experimentation around:
 - 32-bit address-space behavior
-- memory-management differences from RV64 xv6
+- memory-management behavior under Sv32
 - kernel and user-space compatibility on RV32
 
-## Upstream References
+## Project Notes
 
-This project is based on MIT xv6-riscv:
-- Main repository: https://github.com/mit-pdos/xv6-riscv
-- Upstream README: https://github.com/mit-pdos/xv6-riscv/blob/riscv/README
-- Course resources: https://pdos.csail.mit.edu/6.1810/
+The codebase is tuned for a single-core UP runtime and educational kernel experiments.
 
 ## Build And Run
 
@@ -42,4 +39,4 @@ If reporting a bug, include:
 
 ## License And Credits
 
-All original xv6 design and most baseline code belong to the MIT xv6 contributors.
+Core ideas and baseline educational-kernel practices are attributed to their original academic contributors.

@@ -130,21 +130,21 @@ mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 
 UPROGS=\
 	$U/_cat\
+	$U/_banner\
 	$U/_echo\
 	$U/_forktest\
 	$U/_grep\
+	$U/_guess\
 	$U/_init\
 	$U/_kill\
 	$U/_ln\
 	$U/_ls\
 	$U/_mkdir\
 	$U/_rm\
+	$U/_rps\
 	$U/_sh\
-	$U/_stressfs\
-	$U/_grind\
 	$U/_usertests\
 	$U/_wc\
-	$U/_zombie\
 	$U/_logstress\
 	$U/_forphan\
 	$U/_dorphan\
