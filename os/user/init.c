@@ -24,7 +24,7 @@ main(void)
   dup(0);  // stderr
 
   for(;;){
-    printf("YHsys init: starting sh\n");
+    printf("shell initializing...\n\n");
     pid = fork();
     if(pid < 0){
       printf("YHsys init: fork failed\n");

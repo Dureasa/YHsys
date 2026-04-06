@@ -16,6 +16,9 @@ parser.add_argument('testrex', help="test name or regular expression")
 parser.add_argument("-q", action='store_true', help="usertests quick")
 args = parser.parse_args()
 
+KERNEL_ELF = "out/bin/kernel/yhsys-kernel.elf"
+FS_IMAGE = "out/img/fs-system.img"
+
 class QEMU(object):
 
     def __init__(self, reset=False):
@@ -27,12 +30,12 @@ class QEMU(object):
             "qemu-system-riscv32",
             "-machine", "virt",
             "-bios", "none",
-            "-kernel", "kernel/kernel",
+            "-kernel", KERNEL_ELF,
             "-m", "128M",
             "-smp", cpus,
             "-nographic",
             "-global", "virtio-mmio.force-legacy=false",
-            "-drive", "file=fs.img,if=none,format=raw,id=x0",
+            "-drive", f"file={FS_IMAGE},if=none,format=raw,id=x0",
             "-device", "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
         ]
         pid, fd = pty.fork()
@@ -46,14 +49,14 @@ class QEMU(object):
 
     def reset_fs(self):
         try:
-            run(["rm", "fs.img"], check=True)
-            run(["make", "fs.img"], check=True)
+            run(["rm", "-f", FS_IMAGE], check=True)
+            run(["make", FS_IMAGE], check=True)
         except subprocess.CalledProcessError as e:
             print(f"Command failed with exit code {e.returncode}")
 
     def build_kernel(self):
         try:
-            run(["make", "kernel/kernel"], check=True)
+            run(["make", KERNEL_ELF], check=True)
         except subprocess.CalledProcessError as e:
             print(f"Command failed with exit code {e.returncode}")
 
