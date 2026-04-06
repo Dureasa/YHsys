@@ -9,12 +9,13 @@ os/kernel/*.sym
 os/kernel/kernel
 
 # OS user programs build artifacts
-os/user/*.o
-os/user/*.d
-os/user/*.asm
-os/user/*.sym
-os/user/usys.S
-os/user/_*
+# os/user/*.o
+# os/user/*.d
+# os/user/*.asm
+# os/user/*.sym
+# os/user/usys.S
+# os/user/_*
+os/out/*
 
 # OS generated files
 os/fs.img
