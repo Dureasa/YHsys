@@ -1,191 +1,234 @@
 `include "riscv_defines.h"
 `include "riscv_csr_defines.h"
 `include "riscv_excp_defines.h"
-module csr(
+
+module exception_unit (
     // 时钟 & 复位
-    input  wire         clk,
-    input  wire         reset,
+    input  wire                         clk,
+    input  wire                         reset,
 
     // 全局流水线控制
-    input  wire         core_stall,      // 核心暂停
-    output reg          excp_flush,     // 异常冲刷流水线
-    output reg          int_trap_en,    // 进入中断/异常陷阱
+    output wire                         core_stall,
+    output wire                         excp_flush,
+    output wire                         if_excp_flush,
 
-    // 来自 CPU 各模块的异常请求
-    input  wire         id_excp_en,     // 译码阶段异常
-    input  wire [3:0]   id_excp_code,   // 译码异常代码
-    input  wire [`PC_WIDTH-1:0] id_excp_pc,  // 异常PC
+    // ==================== 来自各阶段的异常 ====================
+    input  wire                         if_excp_en,
+    input  wire [3:0]                   if_excp_code,
+    input  wire [`PC_WIDTH-1:0]         if_excp_pc,
 
-    input  wire         mmu_excp_en,    // MMU 异常
-    input  wire [3:0]   mmu_excp_code,  // MMU 异常代码
-    input  wire [`PC_WIDTH-1:0] mmu_excp_vaddr, // MMU 异常虚地址
+    input  wire                         id_excp_en,
+    input  wire [3:0]                   id_excp_code,
+    input  wire [`PC_WIDTH-1:0]         id_excp_pc,
 
-    // 外部中断输入
-    input  wire         ext_int_req,    // 外部中断
-    input  wire         timer_int_req,  // 定时器中断
-    input  wire         sw_int_req,     // 软件中断
+    input  wire                         ex_excp_en,
+    input  wire [3:0]                   ex_excp_code,
+    input  wire [`PC_WIDTH-1:0]         ex_excp_pc,
 
-    // 与 CSR 模块交互（RISC-V 标准）
-    input  wire         csr_mstatus_mie,// 全局中断使能(MIE)
-    input  wire         csr_mstatus_mpie,// 旧中断使能
-    input  wire [3:0]   csr_mie,        // 中断掩码
-    output reg          csr_mstatus_upd,// 更新 CSR
-    output reg          csr_mepc_upd,   // 更新 MEPC
-    output reg          csr_mcause_upd, // 更新 MCAUSE
-    output reg          csr_mtvac_upd, // 更新 MTVAL
-    output reg [`PC_WIDTH-1:0] csr_mepc_data,
-    output reg [3:0]    csr_mcause_data,
-    output reg [`PC_WIDTH-1:0] csr_mtvac_data,
+    input  wire                         mem_excp_en,
+    input  wire [3:0]                   mem_excp_code,
+    input  wire [`PC_WIDTH-1:0]         mem_excp_pc,
 
-    // 异常入口 & 返回地址
-    input  wire [`PC_WIDTH-1:0] csr_mtvec,    // 异常入口基地址
-    input  wire [`PC_WIDTH-1:0] csr_mepc,     // 中断返回PC
-    output reg [`PC_WIDTH-1:0] trap_pc,      // 跳转到异常处理函数
+    // ==================== 外部中断 ====================
+    input  wire                         ext_irq,
+    input  wire                         timer_irq,
+    input  wire                         soft_irq,
 
-    // 中断返回指令（mret）
-    input  wire         mret_en,
-    output reg          mret_ready
+    // ==================== CSR 状态 ====================
+    input  wire [`REG_WIDTH-1:0]        csr_mstatus,
+    input  wire [`REG_WIDTH-1:0]        csr_mepc,
+    input  wire [`REG_WIDTH-1:0]        csr_mcause,
+    input  wire [`REG_WIDTH-1:0]        csr_mtvec,
+    input  wire [`REG_WIDTH-1:0]        csr_stvec,
+    input  wire [`REG_WIDTH-1:0]        csr_medeleg,   // 异常委托 S-mode
+    input  wire [`REG_WIDTH-1:0]        csr_mideleg,   // 中断委托 S-mode
+    input  wire [`REG_WIDTH-1:0]        csr_mie,
+    input  wire [`REG_WIDTH-1:0]        csr_mip,
+
+    // ==================== CSR 写接口 ====================
+    output reg                          csr_wr_en,
+    output reg  [11:0]                  csr_wr_addr,
+    output reg  [`REG_WIDTH-1:0]        csr_wr_data,
+
+    // ==================== 特权级 ====================
+    input  wire [1:0]                   cur_priv_level,  // M=11 S=01 U=00
+
+    // ==================== PC 重定向 ====================
+    output reg                          pc_redirect_en,
+    output reg  [`PC_WIDTH-1:0]         pc_redirect_addr,
+
+    // ==================== 输出 ====================
+    output reg                          in_trap
 );
 
-// ==============================
-// 状态定义
-// ==============================
-localparam STATE_IDLE      = 3'b001;  // 正常运行
-localparam STATE_TRAP      = 3'b010;  // 进入异常/中断
-localparam STATE_MRET      = 3'b100;  // 中断返回
+// ==================== 特权级定义 ====================
+localparam PRIV_U        = 2'b00;
+localparam PRIV_S        = 2'b01;
+localparam PRIV_M        = 2'b11;
 
-reg [2:0] curr_state;
-reg [2:0] next_state;
+// ==================== 中断/异常位 ====================
+localparam MIE_BIT       = 3;
+localparam SIE_BIT       = 1;
 
-// ==============================
-// 中断优先级 & 仲裁
-// ==============================
-// 异常 > 定时器 > 外部 > 软件
-wire excp_valid = id_excp_en || mmu_excp_en;
+// ==================== 内部信号 ====================
+reg                         trap_en;
+reg [3:0]                   trap_code;
+reg [`PC_WIDTH-1:0]         trap_pc;
+reg                         is_irq;
+reg                         trap_to_s;    // 1=进入S-mode 0=进入M-mode
+reg                         is_ecall;
 
-reg        int_selected;
-reg [3:0]  trap_cause;
-reg [`PC_WIDTH-1:0] trap_pc_val;
-reg [`PC_WIDTH-1:0] trap_val;
+// ==================== 全局输出 ====================
+assign core_stall   = trap_en;
+assign excp_flush   = trap_en;
+assign if_excp_flush= trap_en;
 
+// ==================== 异常/中断 仲裁 & 委托选择 ====================
 always @(*) begin
-    int_selected = 1'b0;
-    trap_cause   = 4'b0000;
-    trap_pc_val  = 32'b0;
-    trap_val     = 32'b0;
+    trap_en     = 1'b0;
+    trap_code   = 4'b0;
+    trap_pc     = 32'b0;
+    is_irq      = 1'b0;
+    trap_to_s   = 1'b0;
+    is_ecall    = 1'b0;
 
-    // 1. 异常（最高优先级）
-    if (id_excp_en) begin
-        int_selected = 1'b1;
-        trap_cause   = id_excp_code;
-        trap_pc_val  = id_excp_pc;
-        trap_val     = 32'b0;
+    // ---------------- 中断（遵循 mideleg 委托）----------------
+    if ((cur_priv_level == PRIV_M && csr_mstatus[MIE_BIT]) ||
+        (cur_priv_level == PRIV_S && csr_mstatus[SIE_BIT]) ||
+        (cur_priv_level == PRIV_U)) begin
+
+        if (ext_irq && csr_mie[11] && csr_mip[11]) begin
+            trap_en     = 1'b1;
+            trap_code   = `EXC_EXT_IRQ;
+            is_irq      = 1'b1;
+            trap_to_s   = csr_mideleg[11];
+        end
+        else if (timer_irq && csr_mie[7] && csr_mip[7]) begin
+            trap_en     = 1'b1;
+            trap_code   = `EXC_TIMER_IRQ;
+            is_irq      = 1'b1;
+            trap_to_s   = csr_mideleg[7];
+        end
+        else if (soft_irq && csr_mie[3] && csr_mip[3]) begin
+            trap_en     = 1'b1;
+            trap_code   = `EXC_SOFT_IRQ;
+            is_irq      = 1'b1;
+            trap_to_s   = csr_mideleg[3];
+        end
     end
-    else if (mmu_excp_en) begin
-        int_selected = 1'b1;
-        trap_cause   = mmu_excp_code;
-        trap_pc_val  = id_excp_pc;
-        trap_val     = mmu_excp_vaddr;
+
+    // ---------------- 流水线异常（遵循 medeleg 委托）----------------
+    if (mem_excp_en) begin
+        trap_en     = 1'b1;
+        trap_code   = mem_excp_code;
+        trap_pc     = mem_excp_pc;
+        is_irq      = 1'b0;
+        trap_to_s   = csr_medeleg[trap_code];
+        is_ecall    = (trap_code == `EXC_ECALL_U || trap_code == `EXC_ECALL_S || trap_code == `EXC_ECALL_M);
     end
-    // 2. 中断（全局使能 + 对应掩码）
-    else if (csr_mstatus_mie && !excp_valid) begin
-        if (timer_int_req && csr_mie[`MIE_TIMER]) begin
-            int_selected = 1'b1;
-            trap_cause   = `EXCP_TIMER_INT;
-            trap_pc_val  = id_excp_pc;
-        end
-        else if (ext_int_req && csr_mie[`MIE_EXT]) begin
-            int_selected = 1'b1;
-            trap_cause   = `EXCP_EXT_INT;
-            trap_pc_val  = id_excp_pc;
-        end
-        else if (sw_int_req && csr_mie[`MIE_SW]) begin
-            int_selected = 1'b1;
-            trap_cause   = `EXCP_SW_INT;
-            trap_pc_val  = id_excp_pc;
-        end
+    else if (ex_excp_en) begin
+        trap_en     = 1'b1;
+        trap_code   = ex_excp_code;
+        trap_pc     = ex_excp_pc;
+        is_irq      = 1'b0;
+        trap_to_s   = csr_medeleg[trap_code];
+        is_ecall    = (trap_code == `EXC_ECALL_U || trap_code == `EXC_ECALL_S || trap_code == `EXC_ECALL_M);
+    end
+    else if (id_excp_en) begin
+        trap_en     = 1'b1;
+        trap_code   = id_excp_code;
+        trap_pc     = id_excp_pc;
+        is_irq      = 1'b0;
+        trap_to_s   = csr_medeleg[trap_code];
+    end
+    else if (if_excp_en) begin
+        trap_en     = 1'b1;
+        trap_code   = if_excp_code;
+        trap_pc     = if_excp_pc;
+        is_irq      = 1'b0;
+        trap_to_s   = csr_medeleg[trap_code];
+    end
+
+    // ---------------- ecall 规则：U→S  S→M  M→M ----------------
+    if (is_ecall) begin
+        case (cur_priv_level)
+            PRIV_U: trap_to_s = 1'b1;
+            PRIV_S: trap_to_s = 1'b0;
+            PRIV_M: trap_to_s = 1'b0;
+            default: trap_to_s = 1'b0;
+        endcase
     end
 end
 
-// ==============================
-// 状态机时序逻辑
-// ==============================
+// ==================== Trap 处理 & CSR 写入 ====================
 always @(posedge clk or posedge reset) begin
-    if (reset)
-        curr_state <= STATE_IDLE;
-    else if (!core_stall)
-        curr_state <= next_state;
-end
+    if (reset) begin
+        csr_wr_en        <= 1'b0;
+        csr_wr_addr      <= 12'b0;
+        csr_wr_data      <= 32'b0;
+        pc_redirect_en   <= 1'b0;
+        pc_redirect_addr <= 32'h80000000;
+        in_trap          <= 1'b0;
+    end
+    else if (trap_en && !in_trap) begin
+        in_trap          <= 1'b1;
+        pc_redirect_en   <= 1'b1;
 
-// ==============================
-// 状态机组合逻辑
-// ==============================
-always @(*) begin
-    next_state = curr_state;
+        // ---------------- 进入 S-mode ----------------
+        if (trap_to_s) begin
+            // sepc
+            csr_wr_en        <= 1'b1;
+            csr_wr_addr      <= `CSR_sepc;
+            csr_wr_data      <= trap_pc;
 
-    case (curr_state)
-        STATE_IDLE: begin
-            if ((int_selected || excp_valid) && !core_stall)
-                next_state = STATE_TRAP;
-            else if (mret_en)
-                next_state = STATE_MRET;
+            // scause
+            csr_wr_en        <= 1'b1;
+            csr_wr_addr      <= `CSR_scause;
+            csr_wr_data      <= {27'b0, is_irq, 4'b0, trap_code};
+
+            // sstatus
+            csr_wr_en        <= 1'b1;
+            csr_wr_addr      <= `CSR_sstatus;
+            csr_wr_data      <= csr_mstatus;
+            csr_wr_data[5]   <= csr_mstatus[1];  // SPIE = SIE
+            csr_wr_data[1]   <= 1'b0;            // SIE = 0
+            csr_wr_data[12:11] <= cur_priv_level;// SPP
+
+            // 跳转到 stvec
+            pc_redirect_addr <= csr_stvec;
         end
 
-        STATE_TRAP: begin
-            next_state = STATE_IDLE;
+        // ---------------- 进入 M-mode ----------------
+        else begin
+            // mepc
+            csr_wr_en        <= 1'b1;
+            csr_wr_addr      <= `CSR_mepc;
+            csr_wr_data      <= trap_pc;
+
+            // mcause
+            csr_wr_en        <= 1'b1;
+            csr_wr_addr      <= `CSR_mcause;
+            csr_wr_data      <= {27'b0, is_irq, 4'b0, trap_code};
+
+            // mstatus
+            csr_wr_en        <= 1'b1;
+            csr_wr_addr      <= `CSR_mstatus;
+            csr_wr_data      <= csr_mstatus;
+            csr_wr_data[7]   <= csr_mstatus[3];  // MPIE = MIE
+            csr_wr_data[3]   <= 1'b0;            // MIE = 0
+            csr_wr_data[12:11]<= cur_priv_level;// MPP
+
+            // 跳转到 mtvec
+            pc_redirect_addr <= csr_mtvec;
         end
-
-        STATE_MRET: begin
-            next_state = STATE_IDLE;
-        end
-    endcase
-end
-
-// ==============================
-// 控制信号输出
-// ==============================
-always @(*) begin
-    excp_flush   = 1'b0;
-    int_trap_en  = 1'b0;
-    trap_pc      = 32'b0;
-    mret_ready   = 1'b0;
-
-    csr_mstatus_upd = 1'b0;
-    csr_mepc_upd    = 1'b0;
-    csr_mcause_upd  = 1'b0;
-    csr_mtvac_upd   = 1'b0;
-
-    csr_mepc_data   = 32'b0;
-    csr_mcause_data = 4'b0;
-    csr_mtvac_data  = 32'b0;
-
-    case (curr_state)
-        STATE_IDLE: begin end
-
-        // 进入异常/中断
-        STATE_TRAP: begin
-            excp_flush   = 1'b1;          // 冲刷流水线
-            int_trap_en  = 1'b1;          // 通知流水线跳转
-            trap_pc      = csr_mtvec;     // PC = 异常入口
-
-            // 更新 CSR
-            csr_mepc_upd    = 1'b1;
-            csr_mcause_upd  = 1'b1;
-            csr_mtvac_upd   = 1'b1;
-            csr_mstatus_upd = 1'b1;
-
-            csr_mepc_data   = trap_pc_val;
-            csr_mcause_data = trap_cause;
-            csr_mtvac_data  = trap_val;
-        end
-
-        // mret 返回
-        STATE_MRET: begin
-            mret_ready     = 1'b1;
-            trap_pc        = csr_mepc;    // 返回断点
-            csr_mstatus_upd= 1'b1;        // 恢复 mstatus
-        end
-    endcase
+    end
+    else begin
+        csr_wr_en        <= 1'b0;
+        csr_wr_addr      <= 12'b0;
+        csr_wr_data      <= 32'b0;
+        pc_redirect_en   <= 1'b0;
+        in_trap          <= 1'b0;
+    end
 end
 
 endmodule
