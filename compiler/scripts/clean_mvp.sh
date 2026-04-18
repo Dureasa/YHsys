@@ -7,7 +7,7 @@ COMPILER_DIR="${ROOT_DIR}/compiler"
 OS_DIR="${ROOT_DIR}/os"
 
 echo "[yhc-clean] removing compiler build outputs"
-rm -f "${COMPILER_DIR}"/build/*.ir.json "${COMPILER_DIR}"/build/*.s "${COMPILER_DIR}"/build/*.o
+rm -f "${COMPILER_DIR}"/build/*.ir.json "${COMPILER_DIR}"/build/*.s "${COMPILER_DIR}"/build/*.o "${COMPILER_DIR}"/build/*.elf
 
 echo "[yhc-clean] removing generated YHC user binaries"
 rm -f "${OS_DIR}"/out/bin/user/_yhc_*

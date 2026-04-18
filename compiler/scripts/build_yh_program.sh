@@ -6,9 +6,34 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 COMPILER_DIR="${ROOT_DIR}/compiler"
 OS_DIR="${ROOT_DIR}/os"
 BUILD_DIR="${COMPILER_DIR}/build"
+DIRSIZ=14
+
+normalize_cmd_name() {
+  local raw="$1"
+  local safe
+  local hash
+  local suffix
+  local prefix_len
+
+  safe="$(printf '%s' "${raw}" | sed 's/[^A-Za-z0-9_]/_/g')"
+  if [[ -z "${safe}" ]]; then
+    echo ""
+    return
+  fi
+
+  if (( ${#safe} <= DIRSIZ )); then
+    echo "${safe}"
+    return
+  fi
+
+  hash="$(printf '%s' "${safe}" | cksum | awk '{print $1}')"
+  suffix="$(printf '%04x' $((hash % 65536)))"
+  prefix_len=$((DIRSIZ - 1 - ${#suffix}))
+  echo "${safe:0:prefix_len}_${suffix}"
+}
 
 if [[ $# -lt 1 ]]; then
-  echo "usage: $0 <source.yhc> [program_name]"
+  echo "usage: $0 <source.c> [program_name]"
   exit 1
 fi
 
@@ -27,15 +52,25 @@ fi
 
 SAFE_NAME="$(printf '%s' "${BASE_NAME}" | sed 's/[^A-Za-z0-9_]/_/g')"
 FINAL_NAME="yhc_${SAFE_NAME}"
+CMD_NAME="$(normalize_cmd_name "${FINAL_NAME}")"
+
+if [[ -z "${CMD_NAME}" ]]; then
+  echo "error: empty command name after sanitize"
+  exit 4
+fi
+
+if [[ "${CMD_NAME}" != "${FINAL_NAME}" ]]; then
+  echo "[yhc-build] note: fs command name truncated to '${CMD_NAME}' (DIRSIZ=${DIRSIZ})"
+fi
 
 IR_PATH="${BUILD_DIR}/${FINAL_NAME}.ir.json"
 ASM_PATH="${BUILD_DIR}/${FINAL_NAME}.s"
 OBJ_PATH="${BUILD_DIR}/${FINAL_NAME}.o"
-BIN_PATH="${OS_DIR}/out/bin/user/_${FINAL_NAME}"
+ELF_PATH="${BUILD_DIR}/${FINAL_NAME}.elf"
 
 mkdir -p "${BUILD_DIR}"
 
-python3 "${COMPILER_DIR}/mvp/yhc_compile.py" \
+python3 "${COMPILER_DIR}/yhc_compile.py" \
   --input "${SRC_PATH}" \
   --ir "${IR_PATH}" \
   --asm "${ASM_PATH}" \
@@ -75,10 +110,10 @@ make -C "${OS_DIR}" \
 echo "[yhc-build] assembling ${ASM_PATH}"
 "${TOOLPREFIX}gcc" -march=rv32gc -mabi=ilp32 -fno-pie -no-pie -c -o "${OBJ_PATH}" "${ASM_PATH}"
 
-echo "[yhc-build] linking ${BIN_PATH}"
+echo "[yhc-build] linking ${ELF_PATH}"
 "${TOOLPREFIX}ld" -z max-page-size=4096 -m elf32lriscv \
   -T "${OS_DIR}/user/user.ld" \
-  -o "${BIN_PATH}" \
+  -o "${ELF_PATH}" \
   "${OBJ_PATH}" \
   "${OS_DIR}/out/obj/user/ulib.o" \
   "${OS_DIR}/out/obj/user/printf.o" \
@@ -86,13 +121,15 @@ echo "[yhc-build] linking ${BIN_PATH}"
   "${OS_DIR}/out/obj/user/div64.o" \
   "${OS_DIR}/out/obj/user/usys.o"
 
-echo "[yhc-build] rebuilding fs image with new binary"
-mapfile -t USER_BINS < <(find "${OS_DIR}/out/bin/user" -maxdepth 1 -type f -name "_*" | sort)
-"${OS_DIR}/out/bin/host/mkfs" "${OS_DIR}/out/img/fs-system.img" "${OS_DIR}/README" "${USER_BINS[@]}"
+echo "[yhc-build] injecting ELF into YHsys fs image"
+bash "${COMPILER_DIR}/scripts/inject_user_binary.sh" "${ELF_PATH}" "${CMD_NAME}"
+
+BIN_PATH="${OS_DIR}/out/bin/user/_${CMD_NAME}"
 
 echo "[yhc-build] done"
 echo "[yhc-build] IR      : ${IR_PATH}"
 echo "[yhc-build] ASM     : ${ASM_PATH}"
 echo "[yhc-build] OBJ     : ${OBJ_PATH}"
+echo "[yhc-build] ELF     : ${ELF_PATH}"
 echo "[yhc-build] USER BIN: ${BIN_PATH}"
-echo "[yhc-build] shell cmd in YHsys: ${FINAL_NAME}"
+echo "[yhc-build] shell cmd in YHsys: ${CMD_NAME}"

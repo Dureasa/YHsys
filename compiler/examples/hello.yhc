@@ -1,4 +1,0 @@
-# YHC sample source
-print "Hello from YHC on YHsys RV32!\n";
-print "syscall path: write -> exit\n";
-exit 0;
