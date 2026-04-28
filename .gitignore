@@ -17,6 +17,12 @@ os/kernel/kernel
 # os/user/_*
 os/out/*
 
+# Compiler build artifacts
+compiler/build/
+compiler/**/__pycache__/
+compiler/**/*.pyc
+project_analysis_os_compiler.txt
+
 # OS generated files
 os/fs.img
 os/mkfs/mkfs
@@ -26,3 +32,5 @@ core.*
 
 .vscode/
 .claude/
+
+docs/
