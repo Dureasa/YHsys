@@ -49,7 +49,7 @@ OBJCOPY = $(TOOLPREFIX)objcopy
 OBJDUMP = $(TOOLPREFIX)objdump
 
 CFLAGS = -Wall -Werror -Wno-unknown-attributes -O -fno-omit-frame-pointer -ggdb -gdwarf-2
-CFLAGS += -march=rv32gc
+CFLAGS += -march=rv32im_zicsr
 CFLAGS += -mabi=ilp32
 CFLAGS += -mcmodel=medany
 CFLAGS += -ffreestanding
@@ -132,7 +132,7 @@ $(OBJDIR)/kernel/%.o: $(K)/%.c
 
 $(OBJDIR)/kernel/%.o: $(K)/%.S
 >mkdir -p $(dir $@)
->$(CC) -march=rv32gc -mabi=ilp32 -g $(DEPFLAGS) -c -o $@ $<
+>$(CC) -march=rv32im_zicsr -mabi=ilp32 -g $(DEPFLAGS) -c -o $@ $<
 
 $(USYS_GEN): $(U)/usys.pl
 >mkdir -p $(dir $@)
