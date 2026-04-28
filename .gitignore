@@ -34,3 +34,5 @@ core.*
 .claude/
 
 docs/
+
+*.pyc
