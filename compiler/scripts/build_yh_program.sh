@@ -108,7 +108,7 @@ make -C "${OS_DIR}" \
   out/obj/user/usys.o
 
 echo "[yhc-build] assembling ${ASM_PATH}"
-"${TOOLPREFIX}gcc" -march=rv32gc -mabi=ilp32 -fno-pie -no-pie -c -o "${OBJ_PATH}" "${ASM_PATH}"
+"${TOOLPREFIX}gcc" -march=rv32g -mabi=ilp32 -fno-pie -no-pie -c -o "${OBJ_PATH}" "${ASM_PATH}"
 
 echo "[yhc-build] linking ${ELF_PATH}"
 "${TOOLPREFIX}ld" -z max-page-size=4096 -m elf32lriscv \

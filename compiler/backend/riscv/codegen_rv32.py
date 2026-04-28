@@ -305,6 +305,7 @@ def generate_asm(ir: dict, syscall_table: dict[str, int], program_name: str) -> 
     needs_print_int = any(ins.get("op") == "sys_write_expr" for ins in instructions)
 
     lines.append(".section .text")
+    lines.append(".option norvc")
     lines.append(".globl main")
     lines.append("main:")
     lines.append(f"  addi sp, sp, -{layout.frame_size}")
