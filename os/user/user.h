@@ -25,6 +25,11 @@ char* sys_sbrk(int,int);
 int pause(int);
 int uptime(void);
 
+int sem_create(int);
+int sem_wait(int);
+int sem_post(int);
+int sem_destroy(int);
+
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);

@@ -42,3 +42,7 @@ entry("getpid");
 entry("sbrk");
 entry("pause");
 entry("uptime");
+entry("sem_create");
+entry("sem_wait");
+entry("sem_post");
+entry("sem_destroy");

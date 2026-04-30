@@ -12,9 +12,10 @@ int
 fetchaddr(uint64 addr, uint64 *ip)
 {
   struct proc *p = myproc();
-  if(addr >= p->sz || addr+sizeof(uint64) > p->sz) // both tests needed, in case of overflow
+  uint32 heap_end = as_region_start(&p->as, MR_HEAP) + as_region_size(&p->as, MR_HEAP);
+  if(addr >= heap_end || addr+sizeof(uint64) > heap_end) // both tests needed, in case of overflow
     return -1;
-  if(copyin(p->pagetable, (char *)ip, addr, sizeof(*ip)) != 0)
+  if(copyin(p->as.pagetable, (char *)ip, addr, sizeof(*ip)) != 0)
     return -1;
   return 0;
 }
@@ -25,7 +26,7 @@ int
 fetchstr(uint64 addr, char *buf, int max)
 {
   struct proc *p = myproc();
-  if(copyinstr(p->pagetable, buf, addr, max) < 0)
+  if(copyinstr(p->as.pagetable, buf, addr, max) < 0)
     return -1;
   return strlen(buf);
 }
@@ -101,6 +102,10 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
+extern uint64 sys_sem_create(void);
+extern uint64 sys_sem_wait(void);
+extern uint64 sys_sem_post(void);
+extern uint64 sys_sem_destroy(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -126,6 +131,10 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_sem_create]  sys_sem_create,
+[SYS_sem_wait]    sys_sem_wait,
+[SYS_sem_post]    sys_sem_post,
+[SYS_sem_destroy] sys_sem_destroy,
 };
 
 void
