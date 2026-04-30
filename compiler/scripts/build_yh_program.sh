@@ -64,18 +64,26 @@ if [[ "${CMD_NAME}" != "${FINAL_NAME}" ]]; then
 fi
 
 IR_PATH="${BUILD_DIR}/${FINAL_NAME}.ir.json"
+IR_BEFORE_PATH="${BUILD_DIR}/${FINAL_NAME}.before.ir.json"
+IR_AFTER_PATH="${BUILD_DIR}/${FINAL_NAME}.after.ir.json"
 ASM_PATH="${BUILD_DIR}/${FINAL_NAME}.s"
 OBJ_PATH="${BUILD_DIR}/${FINAL_NAME}.o"
 ELF_PATH="${BUILD_DIR}/${FINAL_NAME}.elf"
+STATS_PATH="${BUILD_DIR}/${FINAL_NAME}.optstats.json"
+OPT_LEVEL="${YHC_OPT_LEVEL:---no-opt}"
 
 mkdir -p "${BUILD_DIR}"
 
 python3 "${COMPILER_DIR}/yhc_compile.py" \
   --input "${SRC_PATH}" \
   --ir "${IR_PATH}" \
+  --ir-before "${IR_BEFORE_PATH}" \
+  --ir-after "${IR_AFTER_PATH}" \
   --asm "${ASM_PATH}" \
+  --stats-json "${STATS_PATH}" \
   --syscall-header "${OS_DIR}/kernel/syscall.h" \
-  --program-name "${FINAL_NAME}"
+  --program-name "${FINAL_NAME}" \
+  "${OPT_LEVEL}"
 
 TOOLPREFIX=""
 for prefix in \
@@ -128,8 +136,11 @@ BIN_PATH="${OS_DIR}/out/bin/user/_${CMD_NAME}"
 
 echo "[yhc-build] done"
 echo "[yhc-build] IR      : ${IR_PATH}"
+echo "[yhc-build] IR pre  : ${IR_BEFORE_PATH}"
+echo "[yhc-build] IR post : ${IR_AFTER_PATH}"
 echo "[yhc-build] ASM     : ${ASM_PATH}"
 echo "[yhc-build] OBJ     : ${OBJ_PATH}"
 echo "[yhc-build] ELF     : ${ELF_PATH}"
+echo "[yhc-build] STATS   : ${STATS_PATH}"
 echo "[yhc-build] USER BIN: ${BIN_PATH}"
 echo "[yhc-build] shell cmd in YHsys: ${CMD_NAME}"
