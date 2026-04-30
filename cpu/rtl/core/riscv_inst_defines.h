@@ -2,8 +2,8 @@
 `define RISCV_INST_DEFINES_H
 
     // 操作码（opcode）
-`define OPCODE_OP 7'b0110011 // R类型
-`define OPCODE_OP_IMM 7'b0010011 // I类型（立即数）
+`define OPCODE_RTYPE 7'b0110011 // R类型
+`define OPCODE_ITYPE 7'b0010011 // I类型（立即数）
 `define OPCODE_LOAD 7'b0000011 // I类型（加载）
 `define OPCODE_STORE 7'b0100011 // S类型（存储）
 `define OPCODE_BRANCH 7'b1100011 // B类型（分支）
@@ -11,7 +11,7 @@
 `define OPCODE_JALR 7'b1100111 // I类型（跳转）
 `define OPCODE_LUI 7'b0110111 // U类型（高位立即数）
 `define OPCODE_AUIPC 7'b0010111 // U类型（PC相对高位立即数）
-`define OPCODE_SYSTEM 7'b1110011 // 系统指令（CSR）
+`define OPCODE_CSR 7'b1110011 // 系统指令（CSR）
 
     // 功能码3（funct3）
 `define FUNCT3_ADD_SUB 3'b000

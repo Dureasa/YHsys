@@ -1,26 +1,31 @@
 `ifndef __RISCV_EXCP_DEFINES_H__
 `define __RISCV_EXCP_DEFINES_H__
 
-    // 异常 & 中断原因编码
-    `define EXCP_INST_ADDR_MISALIGN = 4'b0000;
-`define EXCP_INST_ACCESS_FAULT = 4'b0001;
-`define EXCP_ILLEGAL_INST = 4'b0010;
-`define EXCP_BREAKPOINT = 4'b0011;
-`define EXCP_LOAD_ADDR_MISALIGN = 4'b0100;
-`define EXCP_LOAD_ACCESS_FAULT = 4'b0101;
-`define EXCP_STORE_ADDR_MISALIGN = 4'b0110;
-`define EXCP_STORE_ACCESS_FAULT = 4'b0111;
-`define EXCP_ECALL_U = 4'b1000;
-`define EXCP_ECALL_M = 4'b1011;
+    // ------------------------------
+    // 异常类型（mcause[3:0]）
+    // ------------------------------
+`define EXC_INSTR_ADDR_MIS 4'd0
+`define EXC_INSTR_ACCESS_FAULT 4'd1
+`define EXC_ILLEGAL_INST 4'd2
+`define EXC_BREAKPOINT 4'd3
+`define EXC_LOAD_ADDR_MIS 4'd4
+`define EXC_LOAD_ACCESS_FAULT 4'd5
+`define EXC_STORE_ADDR_MIS 4'd6
+`define EXC_STORE_ACCESS_FAULT 4'd7
 
-// 中断编码
-`define EXCP_SW_INT = 4'b1100;
-`define EXCP_TIMER_INT = 4'b1101;
-`define EXCP_EXT_INT = 4'b1110;
+`define EXC_ECALL_U 4'd8
+`define EXC_ECALL_S 4'd9
+`define EXC_ECALL_M 4'd11
 
-// MIE 中断掩码位
-`define MIE_SW = 0;
-`define MIE_TIMER = 1;
-`define MIE_EXT = 2;
+`define EXC_INSTR_PAGE_FAULT 4'd12
+`define EXC_LOAD_PAGE_FAULT 4'd13
+`define EXC_STORE_PAGE_FAULT 4'd15
+
+    // ------------------------------
+    // 中断类型
+    // ------------------------------
+`define EXC_SOFT_IRQ 4'd0
+`define EXC_TIMER_IRQ 4'd1
+`define EXC_EXT_IRQ 4'd2
 
 `endif
