@@ -1,6 +1,11 @@
 127.0.0.1:7890
 CLAUDE.md
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
 # OS kernel build artifacts
 os/kernel/*.o
 os/kernel/*.d
