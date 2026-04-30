@@ -1,0 +1,34 @@
+在 compiler/ir/optimizer.py 中扩展死代码消除。
+
+现状：
+- optimizer.py 已有 _optimize_once() → _remove_dead_branches() 处理 if(0)/if(1) 死分支
+- 优化采用固定点迭代 optimize_ir()，循环调用 _optimize_once() 直到 IR 不再变化
+- 已实现的优化：常量传播（_propagate_constants）、代数化简（_simplify_instructions）、死分支删除
+- IR 是 JSON dict 线性指令列表，控制流通过 label/goto/if_goto 实现
+
+要求实现：
+
+1. 不可达代码删除
+   - 从第一条指令做前向可达性分析
+   - 无条件 goto 之后、return（sys_exit_expr）之后、无条件跳转目标之外的指令标记为不可达并删除
+   - 在死分支删除之后执行（因为死分支删除会暴露出新的不可达代码）
+
+2. 无用存储删除
+   - 分析每个 assign 的目标变量在后续是否被读取
+   - 如果变量被赋值后从未被读取（或在下一次赋值前未被读取），且赋值操作无副作用，则删除该 assign
+   - 保守处理：数组元素赋值暂不删除（分析复杂），只处理标量
+   - 注意：变量如果在 if_goto 条件中被读取、在表达式中被引用、在 sys_write_expr 这类系统调用参数中被使用，都算"被读取"
+
+3. 集成进现有固定点迭代
+   - 在一个 optimize() 迭代内，先做死分支删除，再做不可达代码删除，最后做无用存储删除
+   - 每次迭代后检查 IR 是否变化，变化则继续迭代
+   - 清理无引用的标签
+
+4. 测试
+   - 在 compiler/tests/ 下添加 dce05.c、dce06.c 等测试用例
+   - dce05.c：return 后的死代码
+   - dce06.c：赋值后不再使用的变量
+   - dce07.c：goto 跳过的死代码
+   - 确保现有测试（run_opt_tests.py）全部通过
+
+代码风格与现有 optimizer.py 保持一致，继续使用纯函数操作 IR dict 的做法。
