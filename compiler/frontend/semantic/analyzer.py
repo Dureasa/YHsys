@@ -10,8 +10,11 @@ from compiler.frontend.ast.nodes import (
     BinaryExpr,
     Block,
     BuiltinCallStmt,
+    CallExpr,
     EmptyStmt,
+    ExprStmt,
     Expression,
+    FunctionDef,
     IfStmt,
     IncDecStmt,
     IntLiteral,
@@ -36,14 +39,84 @@ class SymbolInfo:
         return self.size is not None
 
 
+@dataclass(frozen=True)
+class FunctionInfo:
+    name: str
+    params: list[str]
+    symbols: dict[str, SymbolInfo]
+    has_return: bool
+
+
+@dataclass(frozen=True)
+class ProgramInfo:
+    functions: list[FunctionInfo]
+
+    def function(self, name: str) -> FunctionInfo:
+        for func in self.functions:
+            if func.name == name:
+                return func
+        raise KeyError(name)
+
+    @property
+    def main(self) -> FunctionInfo:
+        return self.function("main")
+
+    @property
+    def symbols(self) -> dict[str, SymbolInfo]:
+        return self.main.symbols
+
+
 class SemanticAnalyzer:
+    BUILTIN_NAMES = {"print_int", "print_str", "pause"}
+    MAX_CALL_ARGS = 6
+
     def __init__(self):
         self.symbols: dict[str, SymbolInfo] = {}
         self.has_return = False
+        self.function_arities: dict[str, int] = {}
 
-    def analyze(self, program: Program) -> dict[str, SymbolInfo]:
-        self._analyze_block(program.body)
-        return self.symbols
+    def analyze(self, program: Program) -> ProgramInfo:
+        infos: list[FunctionInfo] = []
+        saw_main = False
+
+        for func in program.functions:
+            if func.name in self.BUILTIN_NAMES:
+                raise SemanticError(f"function name '{func.name}' conflicts with builtin", func.loc)
+            if func.name in self.function_arities:
+                raise SemanticError(f"redefinition of function '{func.name}'", func.loc)
+            if len(func.params) > self.MAX_CALL_ARGS:
+                raise SemanticError("function has too many parameters; RV32 ABI supports a0-a5", func.loc)
+            if func.name == "main":
+                if saw_main:
+                    raise SemanticError("redefinition of function 'main'", func.loc)
+                if func.params:
+                    raise SemanticError("main must not have parameters", func.loc)
+                saw_main = True
+
+            self.function_arities[func.name] = len(func.params)
+            infos.append(self._analyze_function(func))
+
+        if not saw_main:
+            raise SemanticError("program must define int main()", program.loc)
+
+        return ProgramInfo(functions=infos)
+
+    def _analyze_function(self, func: FunctionDef) -> FunctionInfo:
+        self.symbols = {}
+        self.has_return = False
+
+        for param in func.params:
+            if param.name in self.symbols:
+                raise SemanticError(f"redefinition of parameter '{param.name}'", param.loc)
+            self.symbols[param.name] = SymbolInfo(param.name, None)
+
+        self._analyze_block(func.body)
+        return FunctionInfo(
+            name=func.name,
+            params=[p.name for p in func.params],
+            symbols=dict(self.symbols),
+            has_return=self.has_return,
+        )
 
     def _declare(self, decl: VarDecl) -> None:
         if decl.name in self.symbols:
@@ -87,6 +160,20 @@ class SemanticAnalyzer:
                 raise SemanticError("scalar variable cannot be indexed", expr.loc)
             self._check_expr(expr.index)
             return
+        if isinstance(expr, CallExpr):
+            if expr.name not in self.function_arities:
+                raise SemanticError(f"call to undefined function '{expr.name}'", expr.loc)
+            expected = self.function_arities[expr.name]
+            if len(expr.args) != expected:
+                raise SemanticError(
+                    f"function '{expr.name}' expects {expected} arguments, got {len(expr.args)}",
+                    expr.loc,
+                )
+            if len(expr.args) > self.MAX_CALL_ARGS:
+                raise SemanticError("function call has too many arguments; RV32 ABI supports a0-a5", expr.loc)
+            for arg in expr.args:
+                self._check_expr(arg)
+            return
         if isinstance(expr, UnaryExpr):
             self._check_expr(expr.operand)
             return
@@ -115,6 +202,11 @@ class SemanticAnalyzer:
                 if stmt.arg_expr is None:
                     raise SemanticError(f"{stmt.name} requires expression argument", stmt.loc)
                 self._check_expr(stmt.arg_expr)
+            return
+        if isinstance(stmt, ExprStmt):
+            if not isinstance(stmt.expr, CallExpr):
+                raise SemanticError("only function calls may be used as expression statements", stmt.loc)
+            self._check_expr(stmt.expr)
             return
         if isinstance(stmt, IfStmt):
             self._check_expr(stmt.cond)

@@ -67,7 +67,14 @@ class BinaryExpr:
     loc: SourceLocation
 
 
-Expression = IntLiteral | VariableExpr | ArrayAccessExpr | UnaryExpr | BinaryExpr
+@dataclass(frozen=True)
+class CallExpr:
+    name: str
+    args: list["Expression"]
+    loc: SourceLocation
+
+
+Expression = IntLiteral | VariableExpr | ArrayAccessExpr | UnaryExpr | BinaryExpr | CallExpr
 
 
 @dataclass(frozen=True)
@@ -112,6 +119,12 @@ class BuiltinCallStmt:
 
 
 @dataclass(frozen=True)
+class ExprStmt:
+    expr: Expression
+    loc: SourceLocation
+
+
+@dataclass(frozen=True)
 class IfStmt:
     cond: Expression
     then_block: "Block"
@@ -137,7 +150,7 @@ class EmptyStmt:
     loc: SourceLocation
 
 
-Statement = VarDecl | AssignStmt | IncDecStmt | BuiltinCallStmt | IfStmt | WhileStmt | ReturnStmt | EmptyStmt
+Statement = VarDecl | AssignStmt | IncDecStmt | BuiltinCallStmt | ExprStmt | IfStmt | WhileStmt | ReturnStmt | EmptyStmt
 
 
 @dataclass(frozen=True)
@@ -147,6 +160,27 @@ class Block:
 
 
 @dataclass(frozen=True)
-class Program:
+class Param:
+    name: str
+    loc: SourceLocation
+
+
+@dataclass(frozen=True)
+class FunctionDef:
+    name: str
+    params: list[Param]
     body: Block
     loc: SourceLocation = field(default_factory=lambda: SourceLocation(1, 1))
+
+
+@dataclass(frozen=True)
+class Program:
+    functions: list[FunctionDef]
+    loc: SourceLocation = field(default_factory=lambda: SourceLocation(1, 1))
+
+    @property
+    def body(self) -> Block:
+        for func in self.functions:
+            if func.name == "main":
+                return func.body
+        return self.functions[0].body

@@ -111,6 +111,13 @@ def _simplify_expr(expr: dict[str, Any], env: dict[str, int]) -> dict[str, Any]:
         new_expr["index"] = _simplify_expr(expr["index"], env)
         return new_expr
 
+    if kind == "call":
+        return {
+            "kind": "call",
+            "name": expr["name"],
+            "args": [_simplify_fixed_point(arg, env) for arg in expr.get("args", [])],
+        }
+
     if kind == "unary":
         operand = _simplify_expr(expr["operand"], env)
         if _is_int(operand):
@@ -197,7 +204,7 @@ def _invalidate_on_store(env: dict[str, int], target: dict[str, Any], symbols: l
 
 def optimize_ir(module: dict[str, Any]) -> tuple[dict[str, Any], OptimizationStats]:
     optimized = deepcopy(module)
-    before = len(optimized.get("instructions", []))
+    before = _instruction_count(optimized)
 
     while True:
         next_module = _optimize_once(optimized)
@@ -205,12 +212,29 @@ def optimize_ir(module: dict[str, Any]) -> tuple[dict[str, Any], OptimizationSta
             break
         optimized = next_module
 
-    after = len(optimized.get("instructions", []))
+    after = _instruction_count(optimized)
     return optimized, OptimizationStats(instructions_before=before, instructions_after=after)
+
+
+def _instruction_count(module: dict[str, Any]) -> int:
+    functions = module.get("functions")
+    if isinstance(functions, list) and functions:
+        return sum(len(func.get("instructions", [])) for func in functions)
+    return len(module.get("instructions", []))
 
 
 def _optimize_once(module: dict[str, Any]) -> dict[str, Any]:
     optimized = deepcopy(module)
+    functions = optimized.get("functions")
+    if isinstance(functions, list) and functions:
+        optimized["functions"] = [_optimize_once(func) for func in functions]
+        for func in optimized["functions"]:
+            if func.get("name") == "main":
+                optimized["symbols"] = deepcopy(func.get("symbols", []))
+                optimized["instructions"] = deepcopy(func.get("instructions", []))
+                break
+        return optimized
+
     symbols = optimized.get("symbols", [])
     instructions = optimized.get("instructions", [])
 
@@ -267,7 +291,20 @@ def _optimize_once(module: dict[str, Any]) -> dict[str, Any]:
             idx += 1
             continue
 
-        if op in ("sys_write_expr", "sys_pause_expr", "sys_exit_expr"):
+        if op == "call":
+            ins["args"] = [_simplify_fixed_point(arg, env) for arg in ins.get("args", [])]
+            target = ins.get("target")
+            if isinstance(target, dict):
+                if target.get("kind") == "array":
+                    target = deepcopy(target)
+                    target["index"] = _simplify_fixed_point(target.get("index", {}), env)
+                    ins["target"] = target
+                _invalidate_on_store(env, target, symbols)
+            new_instructions.append(ins)
+            idx += 1
+            continue
+
+        if op in ("sys_write_expr", "sys_pause_expr", "sys_exit_expr", "return_expr"):
             ins["expr"] = _simplify_fixed_point(ins["expr"], env)
             new_instructions.append(ins)
             idx += 1
@@ -334,7 +371,7 @@ def _remove_unreachable_code(instructions: list[dict[str, Any]]) -> list[dict[st
             worklist.append(idx + 1)
             continue
 
-        if op == "sys_exit_expr":
+        if op in ("sys_exit_expr", "return_expr"):
             continue
 
         worklist.append(idx + 1)
@@ -349,6 +386,11 @@ def _expr_reads(expr: dict[str, Any]) -> set[str]:
     if kind == "array":
         reads = {str(expr["name"])}
         reads |= _expr_reads(expr.get("index", {}))
+        return reads
+    if kind == "call":
+        reads: set[str] = set()
+        for arg in expr.get("args", []):
+            reads |= _expr_reads(arg)
         return reads
     if kind == "unary":
         return _expr_reads(expr.get("operand", {}))
@@ -365,6 +407,8 @@ def _expr_is_side_effect_free(expr: dict[str, Any]) -> bool:
         return True
     if kind == "array":
         return _expr_is_side_effect_free(expr.get("index", {}))
+    if kind == "call":
+        return False
     if kind == "unary":
         return _expr_is_side_effect_free(expr.get("operand", {}))
     if kind == "binop":
@@ -407,7 +451,7 @@ def _remove_dead_stores(instructions: list[dict[str, Any]]) -> list[dict[str, An
             if idx + 1 < n:
                 succs[idx].add(idx + 1)
             uses[idx] |= _expr_reads(ins.get("cond", {}))
-        elif op == "sys_exit_expr":
+        elif op in ("sys_exit_expr", "return_expr"):
             uses[idx] |= _expr_reads(ins.get("expr", {}))
         else:
             if idx + 1 < n:
@@ -421,6 +465,14 @@ def _remove_dead_stores(instructions: list[dict[str, Any]]) -> list[dict[str, An
                     defs[idx].add(str(target["name"]))
             elif op in ("sys_write_expr", "sys_pause_expr"):
                 uses[idx] |= _expr_reads(ins.get("expr", {}))
+            elif op == "call":
+                for arg in ins.get("args", []):
+                    uses[idx] |= _expr_reads(arg)
+                target = ins.get("target", {})
+                if target.get("kind") == "array":
+                    uses[idx] |= _expr_reads(target.get("index", {}))
+                elif target.get("kind") == "var":
+                    defs[idx].add(str(target["name"]))
 
     live_in: list[set[str]] = [set() for _ in range(n)]
     live_out: list[set[str]] = [set() for _ in range(n)]

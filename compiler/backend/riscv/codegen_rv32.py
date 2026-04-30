@@ -28,6 +28,8 @@ class FrameLayout:
 @dataclass
 class EmitState:
     internal_label_id: int = 0
+    label_prefix: str = ""
+    eval_stack_depth: int = 0
     alloc: "RegisterAllocation | None" = None
     reg_valid: dict[str, bool] = field(default_factory=dict)
     reg_dirty: dict[str, bool] = field(default_factory=dict)
@@ -35,6 +37,8 @@ class EmitState:
 
     def fresh(self, prefix: str) -> str:
         self.internal_label_id += 1
+        if self.label_prefix:
+            return f".L_{self.label_prefix}_{prefix}_{self.internal_label_id}"
         return f".L_{prefix}_{self.internal_label_id}"
 
 
@@ -61,6 +65,7 @@ class CodegenStats:
 
 
 ALLOCATABLE_REGS = ["t0", "t1", "t2", "t3", "t4", "t5", "t6", "a1", "a2", "a3"]
+ARG_REGS = ["a0", "a1", "a2", "a3", "a4", "a5"]
 
 
 def _const_label(cid: str) -> str:
@@ -69,6 +74,12 @@ def _const_label(cid: str) -> str:
 
 def _user_label(name: str) -> str:
     return f".L_user_{name}"
+
+
+def _function_label(name: str) -> str:
+    if name == "main":
+        return "main"
+    return f"yhc_fn_{name}"
 
 
 def _normalize_symbols(ir: dict) -> list[dict]:
@@ -127,6 +138,11 @@ def _expr_uses(expr: dict, layout: FrameLayout) -> set[str]:
             raise CodegenError(f"scalar variable cannot be indexed: {name}")
         uses |= _expr_uses(expr["index"], layout)
         return uses
+    if kind == "call":
+        uses: set[str] = set()
+        for arg in expr.get("args", []):
+            uses |= _expr_uses(arg, layout)
+        return uses
     if kind == "unary":
         return _expr_uses(expr["operand"], layout)
     if kind == "binop":
@@ -156,7 +172,19 @@ def _instruction_uses_defs(ins: dict, layout: FrameLayout) -> tuple[set[str], se
             raise CodegenError("invalid assignment target")
     elif op == "if_goto":
         uses |= _expr_uses(ins["cond"], layout)
-    elif op in ("sys_write_expr", "sys_pause_expr", "sys_exit_expr"):
+    elif op == "call":
+        for arg in ins.get("args", []):
+            uses |= _expr_uses(arg, layout)
+        target = ins.get("target", {})
+        if target.get("kind") == "var":
+            name = str(target["name"])
+            slot = _symbol_layout(layout, name)
+            if slot.is_array:
+                raise CodegenError(f"array variable requires index: {name}")
+            defs.add(name)
+        elif target.get("kind") == "array":
+            uses |= _expr_uses(target["index"], layout)
+    elif op in ("sys_write_expr", "sys_pause_expr", "sys_exit_expr", "return_expr"):
         uses |= _expr_uses(ins["expr"], layout)
 
     return uses, defs
@@ -241,12 +269,14 @@ def _emit_sw(lines: list[str], state: EmitState, reg: str, offset: int, base: st
 
 def _emit_push(lines: list[str], state: EmitState, reg: str) -> None:
     lines.append("  addi sp, sp, -4")
+    state.eval_stack_depth += 4
     _emit_sw(lines, state, reg, 0, "sp")
 
 
 def _emit_pop(lines: list[str], state: EmitState, reg: str) -> None:
     _emit_lw(lines, state, reg, 0, "sp")
     lines.append("  addi sp, sp, 4")
+    state.eval_stack_depth -= 4
 
 
 def _prepare_reg_for_clobber(lines: list[str], layout: FrameLayout, state: EmitState, reg: str) -> None:
@@ -329,6 +359,40 @@ def _spill_active_registers(lines: list[str], layout: FrameLayout, state: EmitSt
         state.reg_dirty[name] = False
 
 
+def _emit_jal(lines: list[str], state: EmitState, label: str) -> None:
+    padding = (16 - (state.eval_stack_depth % 16)) % 16
+    if padding:
+        lines.append(f"  addi sp, sp, -{padding}")
+        state.eval_stack_depth += padding
+    lines.append(f"  jal ra, {label}")
+    if padding:
+        lines.append(f"  addi sp, sp, {padding}")
+        state.eval_stack_depth -= padding
+
+
+def _emit_call_expr(lines: list[str], expr: dict, layout: FrameLayout, state: EmitState, target: str) -> None:
+    name = str(expr["name"])
+    args = list(expr.get("args", []))
+    if len(args) > len(ARG_REGS):
+        raise CodegenError(f"function '{name}' called with too many arguments")
+
+    for arg in args:
+        _emit_eval_expr(lines, arg, layout, state, "t0")
+        _emit_push(lines, state, "t0")
+
+    _spill_active_registers(lines, layout, state)
+
+    for idx in range(len(args) - 1, -1, -1):
+        _prepare_reg_for_clobber(lines, layout, state, ARG_REGS[idx])
+        _emit_pop(lines, state, ARG_REGS[idx])
+
+    _emit_jal(lines, state, _function_label(name))
+
+    if target != "a0":
+        _prepare_reg_for_clobber(lines, layout, state, target)
+        lines.append(f"  mv {target}, a0")
+
+
 def _emit_eval_expr(lines: list[str], expr: dict, layout: FrameLayout, state: EmitState, target: str = "t0") -> None:
     kind = expr.get("kind")
 
@@ -347,9 +411,15 @@ def _emit_eval_expr(lines: list[str], expr: dict, layout: FrameLayout, state: Em
             raise CodegenError(f"scalar variable cannot be indexed: {expr['name']}")
         _emit_eval_expr(lines, expr["index"], layout, state, target)
         lines.append(f"  slli {target}, {target}, 2")
-        lines.append(f"  addi a4, s0, {slot.offset}")
-        lines.append(f"  add a4, a4, {target}")
-        _emit_lw(lines, state, target, 0, "a4")
+        addr_reg = "a5" if target == "a4" else "a4"
+        _prepare_reg_for_clobber(lines, layout, state, addr_reg)
+        lines.append(f"  addi {addr_reg}, s0, {slot.offset}")
+        lines.append(f"  add {addr_reg}, {addr_reg}, {target}")
+        _emit_lw(lines, state, target, 0, addr_reg)
+        return
+
+    if kind == "call":
+        _emit_call_expr(lines, expr, layout, state, target)
         return
 
     if kind == "unary":
@@ -453,13 +523,12 @@ def _emit_store_lvalue(lines: list[str], target: dict, value_reg: str, layout: F
         slot = _symbol_layout(layout, str(target["name"]))
         if not slot.is_array:
             raise CodegenError(f"scalar variable cannot be indexed: {target['name']}")
-        if value_reg != "a5":
-            _prepare_reg_for_clobber(lines, layout, state, "a5")
-            lines.append(f"  mv a5, {value_reg}")
-        _emit_eval_expr(lines, target["index"], layout, state, "a4")
-        lines.append("  slli a4, a4, 2")
+        _emit_push(lines, state, value_reg)
+        _emit_eval_expr(lines, target["index"], layout, state, "t0")
+        lines.append("  slli t0, t0, 2")
         lines.append(f"  addi a6, s0, {slot.offset}")
-        lines.append("  add a6, a6, a4")
+        lines.append("  add a6, a6, t0")
+        _emit_pop(lines, state, "a5")
         _emit_sw(lines, state, "a5", 0, "a6")
         return
     raise CodegenError("invalid assignment target")
@@ -532,29 +601,70 @@ def load_syscall_table(syscall_header: str) -> dict[str, int]:
     return table
 
 
-def generate_asm(ir: dict, syscall_table: dict[str, int], program_name: str) -> str:
-    layout = _build_frame_layout(ir)
-    constants = {c["id"]: c for c in ir.get("constants", [])}
-    instructions = ir.get("instructions", [])
-    alloc = _build_register_allocation(instructions, layout)
-    state = EmitState(alloc=alloc)
-    lines: list[str] = []
+def _normalize_functions(ir: dict) -> list[dict]:
+    functions = ir.get("functions")
+    if isinstance(functions, list) and functions:
+        return functions
+    return [
+        {
+            "name": "main",
+            "params": [],
+            "symbols": _normalize_symbols(ir),
+            "instructions": ir.get("instructions", []),
+        }
+    ]
 
+
+def _validate_branch_labels(instructions: list[dict]) -> None:
     labels_defined = {ins["name"] for ins in instructions if ins.get("op") == "label"}
     for ins in instructions:
         if ins.get("op") in ("goto", "if_goto") and ins["label"] not in labels_defined:
             raise CodegenError(f"branch target label not defined: {ins['label']}")
 
-    needs_print_int = any(ins.get("op") == "sys_write_expr" for ins in instructions)
 
-    lines.append(".section .text")
-    lines.append(".option norvc")
-    lines.append(".globl main")
-    lines.append("main:")
+def _emit_function_epilogue(lines: list[str], layout: FrameLayout, state: EmitState) -> None:
+    if state.eval_stack_depth != 0:
+        raise CodegenError("unbalanced temporary stack while emitting function epilogue")
+    _emit_lw(lines, state, "ra", layout.saved_ra_offset, "sp")
+    _emit_lw(lines, state, "s0", layout.saved_s0_offset, "sp")
+    lines.append(f"  addi sp, sp, {layout.frame_size}")
+    lines.append("  ret")
+
+
+def _emit_function(
+    lines: list[str],
+    func: dict,
+    constants: dict[str, dict],
+    syscall_table: dict[str, int],
+    stats: CodegenStats,
+    label_prefix: str,
+) -> None:
+    name = str(func.get("name", "main"))
+    params = [str(p) for p in func.get("params", [])]
+    if len(params) > len(ARG_REGS):
+        raise CodegenError(f"function '{name}' has too many parameters")
+
+    layout = _build_frame_layout(func)
+    instructions = func.get("instructions", [])
+    alloc = _build_register_allocation(instructions, layout)
+    state = EmitState(label_prefix=label_prefix, alloc=alloc, stats=stats)
+
+    _validate_branch_labels(instructions)
+
+    label = _function_label(name)
+    lines.append("")
+    lines.append(f".globl {label}")
+    lines.append(f"{label}:")
     lines.append(f"  addi sp, sp, -{layout.frame_size}")
     _emit_sw(lines, state, "s0", layout.saved_s0_offset, "sp")
     _emit_sw(lines, state, "ra", layout.saved_ra_offset, "sp")
     lines.append("  mv s0, sp")
+
+    for idx, param in enumerate(params):
+        slot = _symbol_layout(layout, param)
+        if slot.is_array:
+            raise CodegenError(f"function parameter cannot be array: {param}")
+        _emit_sw(lines, state, ARG_REGS[idx], slot.offset, "s0")
 
     for idx, ins in enumerate(instructions):
         op = ins["op"]
@@ -576,6 +686,18 @@ def generate_asm(ir: dict, syscall_table: dict[str, int], program_name: str) -> 
             _emit_eval_expr(lines, ins["expr"], layout, state, "t0")
             _emit_store_lvalue(lines, ins["target"], "t0", layout, state)
             continue
+        if op == "call":
+            _emit_call_expr(
+                lines,
+                {"kind": "call", "name": ins["name"], "args": ins.get("args", [])},
+                layout,
+                state,
+                "a0",
+            )
+            target = ins.get("target")
+            if isinstance(target, dict):
+                _emit_store_lvalue(lines, target, "a0", layout, state)
+            continue
         if op == "array_zero":
             slot = _symbol_layout(layout, str(ins["name"]))
             if not slot.is_array:
@@ -587,7 +709,7 @@ def generate_asm(ir: dict, syscall_table: dict[str, int], program_name: str) -> 
             cid = ins["const"]
             if cid not in constants:
                 raise CodegenError(f"unknown constant id '{cid}'")
-            _spill_active_registers(lines, layout, state, alloc.live_out[idx])
+            _spill_active_registers(lines, layout, state)
             _prepare_reg_for_clobber(lines, layout, state, "a1")
             _prepare_reg_for_clobber(lines, layout, state, "a2")
             lines.append("  # sys_write(fd, buf, len)")
@@ -599,30 +721,62 @@ def generate_asm(ir: dict, syscall_table: dict[str, int], program_name: str) -> 
             continue
         if op == "sys_write_expr":
             _emit_eval_expr(lines, ins["expr"], layout, state, "a0")
-            _spill_active_registers(lines, layout, state, alloc.live_out[idx])
-            lines.append("  jal ra, .L_print_int")
+            _spill_active_registers(lines, layout, state)
+            _emit_jal(lines, state, ".L_print_int")
             continue
         if op == "sys_pause_expr":
             _emit_eval_expr(lines, ins["expr"], layout, state, "a0")
-            _spill_active_registers(lines, layout, state, alloc.live_out[idx])
+            _spill_active_registers(lines, layout, state)
             lines.append(f"  li a7, {syscall_table['SYS_pause']}")
             lines.append("  ecall")
             continue
         if op == "sys_exit_expr":
             _emit_eval_expr(lines, ins["expr"], layout, state, "a0")
-            _spill_active_registers(lines, layout, state, alloc.live_out[idx])
+            _spill_active_registers(lines, layout, state)
             lines.append(f"  li a7, {syscall_table['SYS_exit']}")
             lines.append("  ecall")
             lines.append("  j .L_halt")
             continue
+        if op == "return_expr":
+            _emit_eval_expr(lines, ins["expr"], layout, state, "a0")
+            _emit_function_epilogue(lines, layout, state)
+            continue
 
         raise CodegenError(f"unsupported IR op '{op}'")
+
+
+def generate_asm(ir: dict, syscall_table: dict[str, int], program_name: str) -> str:
+    constants = {c["id"]: c for c in ir.get("constants", [])}
+    functions = _normalize_functions(ir)
+    stats = CodegenStats()
+    lines: list[str] = []
+
+    needs_print_int = any(
+        ins.get("op") == "sys_write_expr"
+        for func in functions
+        for ins in func.get("instructions", [])
+    )
+
+    lines.append(".section .text")
+    lines.append(".option norvc")
+
+    multi_function = len(functions) > 1
+    for func in functions:
+        name = str(func.get("name", "main"))
+        _emit_function(
+            lines,
+            func,
+            constants,
+            syscall_table,
+            stats,
+            label_prefix=name if multi_function else "",
+        )
 
     lines.append(".L_halt:")
     lines.append("  j .L_halt")
 
     if needs_print_int:
-        _emit_print_int_helper(lines, state, syscall_table["SYS_write"])
+        _emit_print_int_helper(lines, EmitState(stats=stats), syscall_table["SYS_write"])
 
     lines.append("")
     lines.append(".section .rodata")
@@ -635,7 +789,7 @@ def generate_asm(ir: dict, syscall_table: dict[str, int], program_name: str) -> 
 
     lines.append("")
     lines.append(
-        f"# [codegen-stats] loads={state.stats.load_count} stores={state.stats.store_count} temp_reg_uses={state.stats.temp_reg_uses}"
+        f"# [codegen-stats] loads={stats.load_count} stores={stats.store_count} temp_reg_uses={stats.temp_reg_uses}"
     )
     lines.append("")
     return "\n".join(lines)

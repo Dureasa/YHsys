@@ -8,12 +8,16 @@ from compiler.frontend.ast.nodes import (
     BinaryExpr,
     Block,
     BuiltinCallStmt,
+    CallExpr,
     EmptyStmt,
+    ExprStmt,
     Expression,
+    FunctionDef,
     IfStmt,
     IncDecStmt,
     IntLiteral,
     LValue,
+    Param,
     Program,
     ReturnStmt,
     UnaryExpr,
@@ -38,6 +42,10 @@ class Parser:
         self.pos += 1
         return tok
 
+    def peek(self, offset: int = 1) -> Token:
+        idx = min(self.pos + offset, len(self.tokens) - 1)
+        return self.tokens[idx]
+
     def match(self, kind: TokenKind, value: str | None = None) -> Token | None:
         tok = self.cur()
         if tok.kind != kind:
@@ -57,13 +65,42 @@ class Parser:
         return tok
 
     def parse_program(self) -> Program:
+        functions: list[FunctionDef] = []
+        first_loc = self.cur().loc
+        while self.cur().kind != TokenKind.EOF:
+            functions.append(self.parse_function_def())
+        self.expect(TokenKind.EOF)
+        if not functions:
+            raise ParserError("expected function definition", first_loc)
+        return Program(functions=functions, loc=first_loc)
+
+    def parse_function_def(self) -> FunctionDef:
         start = self.expect(TokenKind.KEYWORD, "int")
-        self.expect(TokenKind.KEYWORD, "main")
+        name = self.expect_function_name()
         self.expect(TokenKind.SYMBOL, "(")
+        params = self.parse_param_list()
         self.expect(TokenKind.SYMBOL, ")")
         body = self.parse_block()
-        self.expect(TokenKind.EOF)
-        return Program(body=body, loc=start.loc)
+        return FunctionDef(name=name.value, params=params, body=body, loc=start.loc)
+
+    def expect_function_name(self) -> Token:
+        tok = self.cur()
+        if tok.kind == TokenKind.IDENT or (tok.kind == TokenKind.KEYWORD and tok.value == "main"):
+            self.pos += 1
+            return tok
+        raise ParserError("expected function name", tok.loc)
+
+    def parse_param_list(self) -> list[Param]:
+        params: list[Param] = []
+        if self.cur().kind == TokenKind.SYMBOL and self.cur().value == ")":
+            return params
+        while True:
+            self.expect(TokenKind.KEYWORD, "int")
+            name = self.expect(TokenKind.IDENT)
+            params.append(Param(name=name.value, loc=name.loc))
+            if not self.match(TokenKind.SYMBOL, ","):
+                break
+        return params
 
     def parse_block(self) -> Block:
         lbrace = self.expect(TokenKind.SYMBOL, "{")
@@ -90,6 +127,10 @@ class Parser:
         if tok.kind == TokenKind.IDENT:
             if tok.value in ("print_int", "print_str", "pause"):
                 return self.parse_builtin_call()
+            if self.peek().kind == TokenKind.SYMBOL and self.peek().value == "(":
+                expr = self.parse_call_expr()
+                self.expect(TokenKind.SYMBOL, ";")
+                return ExprStmt(expr=expr, loc=tok.loc)
             return self.parse_assignment_or_incdec()
         raise ParserError(f"unsupported statement start '{tok.value}'", tok.loc)
 
@@ -180,6 +221,18 @@ class Parser:
             self.expect(TokenKind.SYMBOL, ";")
             return AssignStmt(target=target, op=tok.value, expr=expr, loc=tok.loc)
         raise ParserError("expected assignment or increment/decrement", tok.loc)
+
+    def parse_call_expr(self) -> CallExpr:
+        name = self.expect(TokenKind.IDENT)
+        self.expect(TokenKind.SYMBOL, "(")
+        args: list[Expression] = []
+        if not (self.cur().kind == TokenKind.SYMBOL and self.cur().value == ")"):
+            while True:
+                args.append(self.parse_expression())
+                if not self.match(TokenKind.SYMBOL, ","):
+                    break
+        self.expect(TokenKind.SYMBOL, ")")
+        return CallExpr(name=name.value, args=args, loc=name.loc)
 
     def parse_expression(self) -> Expression:
         return self.parse_logical_or()
@@ -298,6 +351,8 @@ class Parser:
             self.bump()
             return IntLiteral(value=int(tok.value), loc=tok.loc)
         if tok.kind == TokenKind.IDENT:
+            if self.peek().kind == TokenKind.SYMBOL and self.peek().value == "(":
+                return self.parse_call_expr()
             self.bump()
             if self.match(TokenKind.SYMBOL, "["):
                 index = self.parse_expression()

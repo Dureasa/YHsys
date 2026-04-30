@@ -4,15 +4,19 @@
 
 ## 1. 程序结构
 
-当前仅支持单文件、单入口函数：
+支持单文件、多函数定义，入口函数仍为 `main`：
 
 ```c
+int add(int a, int b) {
+  return a + b;
+}
+
 int main() {
   // statements
 }
 ```
 
-不支持 `#include`、宏、多函数定义。
+函数返回值类型固定为 `int`，参数类型固定为 `int`。函数可以定义在 `main` 之前或之后，但函数调用必须出现在被调用函数定义之后；当前不支持前向声明、`void`、函数指针、`#include` 和宏。
 
 ## 2. 词法规则
 
@@ -38,7 +42,8 @@ shift           = additive , { ("<<" | ">>") , additive } ;
 additive        = multiplicative , { ("+" | "-") , multiplicative } ;
 multiplicative  = unary , { ("*" | "/" | "%") , unary } ;
 unary           = ("+" | "-" | "!" | "~") , unary | primary ;
-primary         = integer | identifier | identifier "[" expr "]" | "(" expr ")" ;
+primary         = integer | identifier | identifier "[" expr "]" | call | "(" expr ")" ;
+call            = identifier , "(" , [ expr , { "," , expr } ] , ")" ;
 ```
 
 已支持：
@@ -101,15 +106,27 @@ pause(expr);
 - `print_int(expr)`：输出十进制整数并附加换行
 - `print_str("...")`：按字节写字符串
 - `pause(expr)`：映射至 `SYS_pause`
-- `return expr`：映射至 `SYS_exit`
+
+### 5.1 用户函数调用
+
+```c
+int y = add(1, 2);
+print_int(add(y, 3));
+add(1, 2);
+```
+
+- 用户函数调用可作为表达式出现，也可作为独立语句出现
+- 参数和返回值均为 32 位整型
+- RV32 调用约定：`a0-a5` 传参，`a0` 返回结果
 
 ## 6. 运行时语义
 
 - 所有变量为 32 位整型
-- 存储位置位于 `main` 的栈帧
+- 每个函数有独立栈帧；参数作为该函数的局部变量
 - 数组按 `int32` 连续布局
 - 逻辑表达式结果归一化为 `0` 或 `1`
 - 若源码无显式 `return`，编译器自动追加 `return 0`
+- `main` 的 `return expr` 映射为 `SYS_exit(expr)`；普通用户函数恢复栈帧后通过 `ret` 返回调用者
 
 ## 7. 示例
 

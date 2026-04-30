@@ -8,7 +8,9 @@ from compiler.frontend.ast.nodes import (
     BinaryExpr,
     Block,
     BuiltinCallStmt,
+    CallExpr,
     EmptyStmt,
+    ExprStmt,
     IfStmt,
     IncDecStmt,
     IntLiteral,
@@ -20,21 +22,38 @@ from compiler.frontend.ast.nodes import (
     VariableExpr,
     WhileStmt,
 )
-from compiler.frontend.semantic.analyzer import SymbolInfo
+from compiler.frontend.semantic.analyzer import ProgramInfo, SymbolInfo
 
-from .ir_types import IRConstant, IRInstruction, IRModule, IRSymbol
+from .ir_types import IRConstant, IRFunction, IRInstruction, IRModule, IRSymbol
 
 
 class IRBuilder:
-    def __init__(self, symbols: dict[str, SymbolInfo]):
+    def __init__(
+        self,
+        symbols: dict[str, SymbolInfo],
+        *,
+        function_name: str = "main",
+        params: list[str] | None = None,
+        is_main: bool = True,
+        constants: list[IRConstant] | None = None,
+        const_id: int = 0,
+        label_prefix: str = "",
+    ):
         self.module = IRModule()
         self.module.symbols = [IRSymbol(name=s.name, size=s.size) for s in symbols.values()]
+        self.module.constants = constants if constants is not None else []
         self.label_id = 0
-        self.const_id = 0
+        self.const_id = const_id
         self.has_return = False
+        self.function_name = function_name
+        self.params = params or []
+        self.return_op = "sys_exit_expr" if is_main else "return_expr"
+        self.label_prefix = label_prefix
 
     def fresh_label(self, prefix: str) -> str:
         self.label_id += 1
+        if self.label_prefix:
+            return f"{self.label_prefix}_{prefix}_{self.label_id}"
         return f"{prefix}_{self.label_id}"
 
     def add(self, op: str, **args) -> None:
@@ -133,6 +152,8 @@ class IRBuilder:
             return {"kind": "var", "name": expr.name}
         if isinstance(expr, ArrayAccessExpr):
             return {"kind": "array", "name": expr.name, "index": self.lower_expr(expr.index)}
+        if isinstance(expr, CallExpr):
+            return {"kind": "call", "name": expr.name, "args": [self.lower_expr(arg) for arg in expr.args]}
         if isinstance(expr, UnaryExpr):
             lowered = {"kind": "unary", "op": expr.op, "operand": self.lower_expr(expr.operand)}
             return self._try_fold_expr(lowered)
@@ -150,6 +171,9 @@ class IRBuilder:
         target = self.lower_lvalue(stmt.target)
         rhs = self.lower_expr(stmt.expr)
         if stmt.op == "=":
+            if rhs.get("kind") == "call":
+                self.add("call", name=rhs["name"], args=rhs["args"], target=target)
+                return
             self.add("assign", target=target, expr=rhs)
             return
 
@@ -244,6 +268,9 @@ class IRBuilder:
                 self.add("array_zero", name=stmt.name, size=stmt.size)
                 return
             init_expr = self.lower_expr(stmt.init) if stmt.init is not None else {"kind": "int", "value": 0}
+            if init_expr.get("kind") == "call":
+                self.add("call", name=init_expr["name"], args=init_expr["args"], target=target)
+                return
             self.add("assign", target=target, expr=init_expr)
             return
         if isinstance(stmt, AssignStmt):
@@ -255,6 +282,11 @@ class IRBuilder:
         if isinstance(stmt, BuiltinCallStmt):
             self.lower_call(stmt)
             return
+        if isinstance(stmt, ExprStmt):
+            expr = self.lower_expr(stmt.expr)
+            if expr.get("kind") == "call":
+                self.add("call", name=expr["name"], args=expr["args"])
+            return
         if isinstance(stmt, IfStmt):
             self.lower_if(stmt)
             return
@@ -262,7 +294,7 @@ class IRBuilder:
             self.lower_while(stmt)
             return
         if isinstance(stmt, ReturnStmt):
-            self.add("sys_exit_expr", expr=self.lower_expr(stmt.expr))
+            self.add(self.return_op, expr=self.lower_expr(stmt.expr))
             self.has_return = True
             return
         if isinstance(stmt, EmptyStmt):
@@ -277,13 +309,55 @@ class IRBuilder:
 
     def finalize(self) -> IRModule:
         if not self.has_return:
-            self.add("sys_exit_expr", expr={"kind": "int", "value": 0})
+            self.add(self.return_op, expr={"kind": "int", "value": 0})
         self.module.symbols = sorted(self.module.symbols, key=lambda s: s.name)
         return self.module
 
 
-def lower_program(program: Program, symbols: dict[str, SymbolInfo]) -> dict:
+def _lower_single_main(program: Program, symbols: dict[str, SymbolInfo]) -> dict:
     builder = IRBuilder(symbols)
     builder.lower_block(program.body)
     module = builder.finalize()
+    return module.to_dict()
+
+
+def lower_program(program: Program, semantic_info: ProgramInfo | dict[str, SymbolInfo]) -> dict:
+    if isinstance(semantic_info, dict):
+        return _lower_single_main(program, semantic_info)
+
+    if len(program.functions) == 1 and program.functions[0].name == "main":
+        return _lower_single_main(program, semantic_info.main.symbols)
+
+    module = IRModule()
+    constants: list[IRConstant] = []
+    const_id = 0
+
+    for func in program.functions:
+        info = semantic_info.function(func.name)
+        builder = IRBuilder(
+            info.symbols,
+            function_name=func.name,
+            params=info.params,
+            is_main=func.name == "main",
+            constants=constants,
+            const_id=const_id,
+            label_prefix=func.name,
+        )
+        builder.lower_block(func.body)
+        func_module = builder.finalize()
+        const_id = builder.const_id
+
+        ir_func = IRFunction(
+            name=func.name,
+            params=list(info.params),
+            symbols=func_module.symbols,
+            instructions=func_module.instructions,
+        )
+        module.functions.append(ir_func)
+
+        if func.name == "main":
+            module.symbols = func_module.symbols
+            module.instructions = func_module.instructions
+
+    module.constants = constants
     return module.to_dict()

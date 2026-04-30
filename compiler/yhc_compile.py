@@ -55,6 +55,13 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
 
+def _instruction_count(ir: dict) -> int:
+    functions = ir.get("functions")
+    if isinstance(functions, list) and functions:
+        return sum(len(func.get("instructions", [])) for func in functions)
+    return len(ir.get("instructions", []))
+
+
 def main() -> int:
     args = parse_args()
     src_path = Path(args.input)
@@ -86,8 +93,8 @@ def main() -> int:
     else:
         ir_after = json.loads(json.dumps(ir_before))
         opt_stats = OptimizationStats(
-            instructions_before=len(ir_before.get("instructions", [])),
-            instructions_after=len(ir_after.get("instructions", [])),
+            instructions_before=_instruction_count(ir_before),
+            instructions_after=_instruction_count(ir_after),
         )
 
     try:

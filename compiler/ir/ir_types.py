@@ -26,18 +26,38 @@ class IRInstruction:
 
 
 @dataclass
+class IRFunction:
+    name: str
+    params: list[str] = field(default_factory=list)
+    symbols: list[IRSymbol] = field(default_factory=list)
+    instructions: list[IRInstruction] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "params": list(self.params),
+            "symbols": [{"name": s.name, "size": s.size} for s in self.symbols],
+            "instructions": [{"op": ins.op, **ins.args} for ins in self.instructions],
+        }
+
+
+@dataclass
 class IRModule:
     version: str = "1.0"
     target: str = "rv32-yhsys"
     symbols: list[IRSymbol] = field(default_factory=list)
     constants: list[IRConstant] = field(default_factory=list)
     instructions: list[IRInstruction] = field(default_factory=list)
+    functions: list[IRFunction] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "version": self.version,
             "target": self.target,
             "symbols": [{"name": s.name, "size": s.size} for s in self.symbols],
             "constants": [{"id": c.cid, "text": c.text, "size": c.size} for c in self.constants],
             "instructions": [{"op": ins.op, **ins.args} for ins in self.instructions],
         }
+        if self.functions:
+            data["functions"] = [func.to_dict() for func in self.functions]
+        return data
