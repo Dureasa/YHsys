@@ -192,8 +192,8 @@ found:
 	}
 
 	// An empty user page table.
-	p->pagetable = proc_pagetable(p);
-	if(p->pagetable == 0){
+	p->as = proc_addrspace_create(p);
+	if(p->as.pagetable == 0){
 		freeproc(p);
 		release(&p->lock);
 		return 0;
@@ -217,10 +217,9 @@ freeproc(struct proc *p)
 	if(p->trapframe)
 		kfree((void*)p->trapframe);
 	p->trapframe = 0;
-	if(p->pagetable)
-		proc_freepagetable(p->pagetable, p->sz);
-	p->pagetable = 0;
-	p->sz = 0;
+	if(p->as.pagetable)
+		proc_addrspace_free(p);
+	memset(&p->as, 0, sizeof(p->as));
 	p->pid = 0;
 	p->parent = 0;
 	p->name[0] = 0;
@@ -231,50 +230,6 @@ freeproc(struct proc *p)
 	p->mlfq_ticks_used = 0;
 	p->mlfq_stamp = 0;
 	p->state = UNUSED;
-}
-
-// Create a user page table for a given process, with no user memory,
-// but with trampoline and trapframe pages.
-pagetable_t
-proc_pagetable(struct proc *p)
-{
-	pagetable_t pagetable;
-
-	// An empty page table.
-	pagetable = uvmcreate();
-	if(pagetable == 0)
-		return 0;
-
-	// map the trampoline code (for system call return)
-	// at the highest user virtual address.
-	// only the supervisor uses it, on the way
-	// to/from user space, so not PTE_U.
-	if(mappages(pagetable, TRAMPOLINE, PGSIZE,
-							(uint32)trampoline, PTE_R | PTE_X) < 0){
-		uvmfree(pagetable, 0);
-		return 0;
-	}
-
-	// map the trapframe page just below the trampoline page, for
-	// trampoline.S.
-	if(mappages(pagetable, TRAPFRAME, PGSIZE,
-							(uint32)(p->trapframe), PTE_R | PTE_W) < 0){
-		uvmunmap(pagetable, TRAMPOLINE, 1, 0);
-		uvmfree(pagetable, 0);
-		return 0;
-	}
-
-	return pagetable;
-}
-
-// Free a process's page table, and free the
-// physical memory it refers to.
-void
-proc_freepagetable(pagetable_t pagetable, uint64 sz)
-{
-	uvmunmap(pagetable, TRAMPOLINE, 1, 0);
-	uvmunmap(pagetable, TRAPFRAME, 1, 0);
-	uvmfree(pagetable, sz);
 }
 
 // Set up first user process.
@@ -298,21 +253,40 @@ userinit(void)
 int
 growproc(int n)
 {
-	uint64 sz;
+	struct mem_region *heap;
+	uint32 sz;
+	uint32 newsz;
 	struct proc *p = myproc();
 
-	sz = p->sz;
+	heap = 0;
+	for(int i = 0; i < p->as.region_count; i++){
+		if(p->as.regions[i].type == MR_HEAP){
+			heap = &p->as.regions[i];
+			break;
+		}
+	}
+	if(heap == 0)
+		return -1;
+
+	sz = heap->va_end;
+	newsz = sz + n;
+
 	if(n > 0){
-		if(sz + n > TRAPFRAME) {
+		if(newsz < sz || newsz > TRAPFRAME){
 			return -1;
 		}
-		if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
+		if((newsz = uvmalloc(&p->as, sz, newsz, PTE_W)) == 0){
 			return -1;
 		}
 	} else if(n < 0){
-		sz = uvmdealloc(p->pagetable, sz, sz + n);
+		if(newsz > sz || newsz < heap->va_start){
+			newsz = sz;
+		} else {
+			newsz = uvmdealloc(&p->as, sz, newsz);
+		}
 	}
-	p->sz = sz;
+	if(as_resize_region(&p->as, MR_HEAP, newsz) < 0)
+		return -1;
 	return 0;
 }
 
@@ -331,12 +305,11 @@ kfork(void)
 	}
 
 	// Copy user memory from parent to child.
-	if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+	if(uvmcopy(&np->as, &p->as) < 0){
 		freeproc(np);
 		release(&np->lock);
 		return -1;
 	}
-	np->sz = p->sz;
 
 	// copy saved user registers.
 	*(np->trapframe) = *(p->trapframe);
@@ -453,7 +426,7 @@ kwait(uint64 addr)
 				if(pp->state == ZOMBIE){
 					// Found one.
 					pid = pp->pid;
-					if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
+					if(addr != 0 && copyout(p->as.pagetable, addr, (char *)&pp->xstate,
 																	sizeof(pp->xstate)) < 0) {
 						release(&pp->lock);
 						release(&wait_lock);
@@ -616,7 +589,7 @@ forkret(void)
 
 	// return to user space, mimicing usertrap()'s return.
 	prepare_return();
-	uint32 satp = MAKE_SATP(p->pagetable);
+	uint32 satp = MAKE_SATP(p->as.pagetable);
 	uint32 trampoline_userret = TRAMPOLINE + (uint32)(userret - trampoline);
 	((void (*)(uint32))trampoline_userret)(satp);
 }
@@ -724,7 +697,7 @@ either_copyout(int user_dst, uint32 dst, void *src, uint32 len)
 {
 	struct proc *p = myproc();
 	if(user_dst){
-		return copyout(p->pagetable, dst, src, len);
+		return copyout(p->as.pagetable, dst, src, len);
 	} else {
 		memmove((char *)dst, src, len);
 		return 0;
@@ -739,7 +712,7 @@ either_copyin(void *dst, int user_src, uint32 src, uint32 len)
 {
 	struct proc *p = myproc();
 	if(user_src){
-		return copyin(p->pagetable, dst, src, len);
+		return copyin(p->as.pagetable, dst, src, len);
 	} else {
 		memmove(dst, (char*)src, len);
 		return 0;

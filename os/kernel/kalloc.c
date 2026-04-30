@@ -18,11 +18,22 @@ struct run {
   struct run *next;
 };
 
+#define MAX_ORDER 15
+#define NPAGES ((PHYSTOP - KERNBASE) / PGSIZE)
+#define PG_BUDDY_FREE 1
+
+struct free_area {
+  struct run *freelist;
+  uint32 nr_free;
+};
+
 struct {
   struct spinlock lock;
-  struct run *freelist;
-  uint16 refcnt[(PHYSTOP - KERNBASE) / PGSIZE];
+  struct free_area free_areas[MAX_ORDER + 1];
+  uint16 refcnt[NPAGES];
 } kmem;
+
+static uint8 page_state[NPAGES];
 
 static int
 pa2idx(uint32 pa)
@@ -30,11 +41,130 @@ pa2idx(uint32 pa)
   return (pa - KERNBASE) / PGSIZE;
 }
 
+static uint32
+idx2pa(int idx)
+{
+  return KERNBASE + (uint32)idx * PGSIZE;
+}
+
+static void
+set_block_state(int idx, int order, uint8 state)
+{
+  int i;
+  int npages;
+
+  npages = 1 << order;
+  for(i = 0; i < npages; i++)
+    page_state[idx + i] = state;
+}
+
+static void
+freelist_push(int order, struct run *r)
+{
+  r->next = kmem.free_areas[order].freelist;
+  kmem.free_areas[order].freelist = r;
+  kmem.free_areas[order].nr_free++;
+}
+
+static struct run *
+freelist_pop(int order)
+{
+  struct run *r;
+
+  r = kmem.free_areas[order].freelist;
+  if(r){
+    kmem.free_areas[order].freelist = r->next;
+    kmem.free_areas[order].nr_free--;
+  }
+  return r;
+}
+
+static int
+freelist_remove(int order, struct run *target)
+{
+  struct run *p;
+  struct run *prev;
+
+  prev = 0;
+  for(p = kmem.free_areas[order].freelist; p; p = p->next){
+    if(p == target){
+      if(prev)
+        prev->next = p->next;
+      else
+        kmem.free_areas[order].freelist = p->next;
+      kmem.free_areas[order].nr_free--;
+      return 1;
+    }
+    prev = p;
+  }
+  return 0;
+}
+
+static struct run *
+buddy_alloc_order0(void)
+{
+  struct run *r;
+  int order;
+  int idx;
+  int buddy_idx;
+
+  for(order = 0; order <= MAX_ORDER; order++){
+    if(kmem.free_areas[order].freelist)
+      break;
+  }
+  if(order > MAX_ORDER)
+    return 0;
+
+  r = freelist_pop(order);
+  idx = pa2idx((uint32)r);
+  set_block_state(idx, order, 0);
+
+  while(order > 0){
+    order--;
+    buddy_idx = idx + (1 << order);
+    set_block_state(buddy_idx, order, PG_BUDDY_FREE);
+    freelist_push(order, (struct run*)idx2pa(buddy_idx));
+  }
+
+  return (struct run*)idx2pa(idx);
+}
+
+static void
+buddy_free_order0(int idx)
+{
+  int order;
+  int buddy_idx;
+
+  order = 0;
+  set_block_state(idx, order, PG_BUDDY_FREE);
+
+  while(order < MAX_ORDER){
+    buddy_idx = idx ^ (1 << order);
+    if(buddy_idx < 0 || buddy_idx >= NPAGES)
+      break;
+    if(page_state[buddy_idx] != PG_BUDDY_FREE)
+      break;
+    if(freelist_remove(order, (struct run*)idx2pa(buddy_idx)) == 0)
+      break;
+
+    set_block_state(idx, order, 0);
+    set_block_state(buddy_idx, order, 0);
+    if(buddy_idx < idx)
+      idx = buddy_idx;
+    order++;
+    set_block_state(idx, order, PG_BUDDY_FREE);
+  }
+
+  freelist_push(order, (struct run*)idx2pa(idx));
+}
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  memset(kmem.free_areas, 0, sizeof(kmem.free_areas));
   memset(kmem.refcnt, 0, sizeof(kmem.refcnt));
+  memset(page_state, 0, sizeof(page_state));
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -72,7 +202,6 @@ kaddref(uint32 pa)
 void
 kfree(void *pa)
 {
-  struct run *r;
   int idx;
 
   if(((uint32)pa % PGSIZE) != 0 || (char*)pa < end || (uint32)pa >= PHYSTOP)
@@ -91,10 +220,7 @@ kfree(void *pa)
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
-
-  r = (struct run*)pa;
-  r->next = kmem.freelist;
-  kmem.freelist = r;
+  buddy_free_order0(idx);
   release(&kmem.lock);
 }
 
@@ -108,9 +234,8 @@ kalloc(void)
   int idx;
 
   acquire(&kmem.lock);
-  r = kmem.freelist;
+  r = buddy_alloc_order0();
   if(r){
-    kmem.freelist = r->next;
     idx = pa2idx((uint32)r);
     kmem.refcnt[idx] = 1;
   }

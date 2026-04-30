@@ -28,6 +28,30 @@ struct cpu {
 
 extern struct cpu bootcpu;
 
+// Memory region types
+#define MR_FREE       0  // unmapped
+#define MR_TEXT       1  // executable code segment
+#define MR_HEAP       2  // heap (sbrk)
+#define MR_STACK      3  // user stack (including guard page)
+#define MR_MMIO       4  // mmapped device memory
+#define MR_TRAPFRAME  5  // trapframe page
+#define MR_TRAMPOLINE 6  // trampoline page
+
+#define MAX_MREGIONS 16
+
+struct mem_region {
+  uint32 va_start;  // start virtual address (page-aligned)
+  uint32 va_end;    // end virtual address (page-aligned, exclusive)
+  int type;         // MR_TEXT / MR_HEAP / MR_STACK / etc.
+  int perm;         // PTE_R|PTE_W|PTE_X, without PTE_U
+};
+
+struct addr_space {
+  pagetable_t pagetable;  // root page table
+  struct mem_region regions[MAX_MREGIONS];
+  int region_count;
+};
+
 // per-process data for the trap handling code in trampoline.S.
 // sits in a page by itself just under the trampoline page in the
 // user page table. not specially mapped in the kernel page table.
@@ -97,8 +121,14 @@ struct proc {
 
   // these are private to the process, so p->lock need not be held.
   uint32 kstack;               // Virtual address of kernel stack
-  uint32 sz;                   // Size of process memory (bytes)
-  pagetable_t pagetable;       // User page table
+  union {
+    struct addr_space as;      // User address space (pagetable + regions)
+    struct {
+      pagetable_t pagetable;   // compatibility alias for existing call sites
+      struct mem_region _regions_compat[MAX_MREGIONS];
+      int _region_count_compat;
+    };
+  };
   struct trapframe *trapframe; // data page for trampoline.S
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files

@@ -184,15 +184,220 @@ uvmcreate()
   return pagetable;
 }
 
+struct addr_space
+as_create(void)
+{
+  struct addr_space as;
+  memset(&as, 0, sizeof(as));
+  as.pagetable = uvmcreate();
+  return as;
+}
+
+static int
+as_region_index(struct addr_space *as, int type)
+{
+  int i;
+
+  for(i = 0; i < as->region_count; i++){
+    if(as->regions[i].type == type)
+      return i;
+  }
+  return -1;
+}
+
+static int
+as_region_do_free(int type)
+{
+  return type != MR_MMIO && type != MR_TRAPFRAME && type != MR_TRAMPOLINE;
+}
+
+static uint32
+as_region_map_start(struct mem_region *r)
+{
+  return PGROUNDDOWN(r->va_start);
+}
+
+static uint32
+as_region_map_npages(struct mem_region *r)
+{
+  uint32 start, end;
+
+  if(r->va_end <= r->va_start)
+    return 0;
+  start = PGROUNDDOWN(r->va_start);
+  end = PGROUNDUP(r->va_end);
+  return (end - start) / PGSIZE;
+}
+
+int
+as_add_region(struct addr_space *as, uint32 va_start, uint32 va_end, int type, int perm)
+{
+  int i, ins;
+
+  if(as == 0 || as->pagetable == 0)
+    return -1;
+  if((va_start % PGSIZE) != 0)
+    return -1;
+  if(type != MR_HEAP && (va_end % PGSIZE) != 0)
+    return -1;
+  if(va_end < va_start || va_end > TRAPFRAME)
+    return -1;
+  if(as->region_count >= MAX_MREGIONS)
+    return -1;
+  if(as_region_index(as, type) >= 0)
+    return -1;
+
+  for(i = 0; i < as->region_count; i++){
+    struct mem_region *r = &as->regions[i];
+    if(!(va_end <= r->va_start || va_start >= r->va_end))
+      return -1;
+  }
+
+  ins = as->region_count;
+  for(i = 0; i < as->region_count; i++){
+    if(va_start < as->regions[i].va_start){
+      ins = i;
+      break;
+    }
+  }
+  for(i = as->region_count; i > ins; i--)
+    as->regions[i] = as->regions[i - 1];
+
+  as->regions[ins].va_start = va_start;
+  as->regions[ins].va_end = va_end;
+  as->regions[ins].type = type;
+  as->regions[ins].perm = perm;
+  as->region_count++;
+  return 0;
+}
+
+struct mem_region *
+as_find_region(struct addr_space *as, uint32 va)
+{
+  int i;
+
+  if(as == 0)
+    return 0;
+  for(i = 0; i < as->region_count; i++){
+    struct mem_region *r = &as->regions[i];
+    if(va >= r->va_start && va < r->va_end)
+      return r;
+  }
+  return 0;
+}
+
+void
+as_remove_region(struct addr_space *as, int type)
+{
+  int i, idx;
+  struct mem_region r;
+
+  if(as == 0 || as->pagetable == 0)
+    return;
+
+  idx = as_region_index(as, type);
+  if(idx < 0)
+    return;
+
+  r = as->regions[idx];
+  if(as_region_map_npages(&r) > 0)
+    uvmunmap(as, as_region_map_start(&r), as_region_map_npages(&r), as_region_do_free(r.type));
+
+  for(i = idx; i + 1 < as->region_count; i++)
+    as->regions[i] = as->regions[i + 1];
+  as->region_count--;
+}
+
+uint32
+as_region_start(struct addr_space *as, int type)
+{
+  int idx;
+
+  if(as == 0)
+    return 0;
+  idx = as_region_index(as, type);
+  if(idx < 0)
+    return 0;
+  return as->regions[idx].va_start;
+}
+
+uint32
+as_region_size(struct addr_space *as, int type)
+{
+  int idx;
+
+  if(as == 0)
+    return 0;
+  idx = as_region_index(as, type);
+  if(idx < 0)
+    return 0;
+  return as->regions[idx].va_end - as->regions[idx].va_start;
+}
+
+int
+as_resize_region(struct addr_space *as, int type, uint32 new_end)
+{
+  int i, idx;
+  uint32 va_start;
+
+  if(as == 0)
+    return -1;
+  if(new_end > TRAPFRAME)
+    return -1;
+
+  idx = as_region_index(as, type);
+  if(idx < 0)
+    return -1;
+
+  va_start = as->regions[idx].va_start;
+  if(new_end < va_start)
+    return -1;
+
+  for(i = 0; i < as->region_count; i++){
+    struct mem_region *r;
+    if(i == idx)
+      continue;
+    r = &as->regions[i];
+    if(!(new_end <= r->va_start || va_start >= r->va_end))
+      return -1;
+  }
+
+  as->regions[idx].va_end = new_end;
+  return 0;
+}
+
+void
+as_print(struct addr_space *as)
+{
+  int i;
+
+  if(as == 0){
+    printf("addr_space: null\n");
+    return;
+  }
+
+  printf("addr_space: pagetable=%p regions=%d\n", as->pagetable, as->region_count);
+  for(i = 0; i < as->region_count; i++){
+    struct mem_region *r = &as->regions[i];
+    printf("  [%d] %x-%x type=%d perm=%x\n", i, r->va_start, r->va_end, r->type, r->perm);
+  }
+}
+
 // Remove npages of mappings starting from va. va must be
 // page-aligned. It's OK if the mappings don't exist.
 // Optionally free the physical memory.
 void
-uvmunmap(pagetable_t pagetable, uint32 va, uint32 npages, int do_free)
+uvmunmap(struct addr_space *as, uint32 va, uint32 npages, int do_free)
 {
   uint32 a;
   uint32 i;
   pte_t *pte;
+  pagetable_t pagetable;
+
+  if(as == 0 || as->pagetable == 0)
+    panic("uvmunmap: as");
+
+  pagetable = as->pagetable;
 
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
@@ -214,10 +419,15 @@ uvmunmap(pagetable_t pagetable, uint32 va, uint32 npages, int do_free)
 // Allocate PTEs and physical memory to grow a process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
 uint32
-uvmalloc(pagetable_t pagetable, uint32 oldsz, uint32 newsz, int xperm)
+uvmalloc(struct addr_space *as, uint32 oldsz, uint32 newsz, int xperm)
 {
   char *mem;
   uint32 a;
+  pagetable_t pagetable;
+
+  if(as == 0 || as->pagetable == 0)
+    return 0;
+  pagetable = as->pagetable;
 
   if(newsz < oldsz)
     return oldsz;
@@ -226,13 +436,13 @@ uvmalloc(pagetable_t pagetable, uint32 oldsz, uint32 newsz, int xperm)
   for(a = oldsz; a < newsz; a += PGSIZE){
     mem = kalloc();
     if(mem == 0){
-      uvmdealloc(pagetable, a, oldsz);
+      uvmdealloc(as, a, oldsz);
       return 0;
     }
     memset(mem, 0, PGSIZE);
     if(mappages(pagetable, a, PGSIZE, (uint32)mem, PTE_R|PTE_U|xperm) != 0){
       kfree(mem);
-      uvmdealloc(pagetable, a, oldsz);
+      uvmdealloc(as, a, oldsz);
       return 0;
     }
   }
@@ -244,14 +454,14 @@ uvmalloc(pagetable_t pagetable, uint32 oldsz, uint32 newsz, int xperm)
 // need to be less than oldsz.  oldsz can be larger than the actual
 // process size.  Returns the new process size.
 uint32
-uvmdealloc(pagetable_t pagetable, uint32 oldsz, uint32 newsz)
+uvmdealloc(struct addr_space *as, uint32 oldsz, uint32 newsz)
 {
   if(newsz >= oldsz)
     return oldsz;
 
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
-    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+    uvmunmap(as, PGROUNDUP(newsz), npages, 1);
   }
 
   return newsz;
@@ -277,55 +487,150 @@ freewalk(pagetable_t pagetable)
   kfree((void*)pagetable);
 }
 
+static void
+freewalkall(pagetable_t pagetable)
+{
+  for(int i = 0; i < 1024; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) == 0)
+      continue;
+    if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      uint32 child = PTE2PA(pte);
+      freewalkall((pagetable_t)child);
+    } else {
+      kfree((void*)PTE2PA(pte));
+    }
+    pagetable[i] = 0;
+  }
+  kfree((void*)pagetable);
+}
+
 // Free user memory pages,
 // then free page-table pages.
 void
-uvmfree(pagetable_t pagetable, uint32 sz)
+uvmfree(struct addr_space *as)
 {
-  if(sz > 0)
-    uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 1);
-  freewalk(pagetable);
+  int i;
+
+  if(as == 0 || as->pagetable == 0)
+    return;
+
+  for(i = 0; i < as->region_count; i++){
+    struct mem_region *r = &as->regions[i];
+    if(as_region_map_npages(r) > 0)
+      uvmunmap(as, as_region_map_start(r), as_region_map_npages(r), as_region_do_free(r->type));
+  }
+
+  as->region_count = 0;
+  freewalkall(as->pagetable);
+  as->pagetable = 0;
 }
 
-// Given a parent process's page table, copy
-// its memory into a child's page table.
-// Copies both the page table and the
-// physical memory.
-// returns 0 on success, -1 on failure.
-// frees any allocated pages on failure.
+void
+as_destroy(struct addr_space *as)
+{
+  if(as == 0 || as->pagetable == 0){
+    if(as)
+      as->region_count = 0;
+    return;
+  }
+
+  uvmunmap(as, TRAMPOLINE, 1, 0);
+  uvmunmap(as, TRAPFRAME, 1, 0);
+  uvmfree(as);
+}
+
 int
-uvmcopy(pagetable_t old, pagetable_t new, uint32 sz)
+as_copy(struct addr_space *dst, struct addr_space *src)
 {
   pte_t *pte;
-  uint32 pa, i;
+  uint32 pa, va;
   uint flags;
+  int i;
 
-  for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
-      continue;   // page table entry hasn't been allocated
-    if((*pte & PTE_V) == 0)
-      continue;   // physical page hasn't been allocated
+  if(dst == 0 || src == 0 || dst->pagetable == 0 || src->pagetable == 0)
+    return -1;
 
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
+  for(i = 0; i < dst->region_count; i++){
+    struct mem_region *r = &dst->regions[i];
+    if(as_region_map_npages(r) > 0)
+      uvmunmap(dst, as_region_map_start(r), as_region_map_npages(r), as_region_do_free(r->type));
+  }
+  dst->region_count = 0;
 
-    if(flags & PTE_W){
-      flags = (flags & ~PTE_W) | PTE_COW;
-      *pte = PA2PTE(pa) | flags;
-    }
-
-    kaddref(pa);
-    if(mappages(new, i, PGSIZE, pa, flags) != 0){
-      kfree((void*)pa);
+  for(i = 0; i < src->region_count; i++){
+    struct mem_region *r = &src->regions[i];
+    if(as_add_region(dst, r->va_start, r->va_end, r->type, r->perm) < 0)
       goto err;
+
+    for(va = PGROUNDDOWN(r->va_start); va < PGROUNDUP(r->va_end); va += PGSIZE){
+      if((pte = walk(src->pagetable, va, 0)) == 0)
+        continue;
+      if((*pte & PTE_V) == 0)
+        continue;
+
+      pa = PTE2PA(*pte);
+      flags = PTE_FLAGS(*pte);
+
+      if(flags & PTE_W){
+        flags = (flags & ~PTE_W) | PTE_COW;
+        *pte = PA2PTE(pa) | flags;
+      }
+
+      kaddref(pa);
+      if(mappages(dst->pagetable, va, PGSIZE, pa, flags) != 0){
+        kfree((void*)pa);
+        goto err;
+      }
     }
   }
+
   sfence_vma();
   return 0;
 
  err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
+  for(i = 0; i < dst->region_count; i++){
+    struct mem_region *r = &dst->regions[i];
+    if(as_region_map_npages(r) > 0)
+      uvmunmap(dst, as_region_map_start(r), as_region_map_npages(r), as_region_do_free(r->type));
+  }
+  dst->region_count = 0;
+  sfence_vma();
   return -1;
+}
+
+int
+uvmcopy(struct addr_space *dst_as, struct addr_space *src_as)
+{
+  return as_copy(dst_as, src_as);
+}
+
+struct addr_space
+proc_addrspace_create(struct proc *p)
+{
+  struct addr_space as;
+
+  as = as_create();
+  if(as.pagetable == 0)
+    return as;
+
+  if(mappages(as.pagetable, TRAMPOLINE, PGSIZE, (uint32)trampoline, PTE_R | PTE_X) < 0){
+    as_destroy(&as);
+    return as;
+  }
+
+  if(mappages(as.pagetable, TRAPFRAME, PGSIZE, (uint32)p->trapframe, PTE_R | PTE_W) < 0){
+    as_destroy(&as);
+    return as;
+  }
+
+  return as;
+}
+
+void
+proc_addrspace_free(struct proc *p)
+{
+  as_destroy(&p->as);
 }
 
 // mark a PTE invalid for user access.
@@ -466,9 +771,12 @@ vmfault(pagetable_t pagetable, uint32 va, int read)
   uint32 mem, pa;
   pte_t *pte;
   uint flags;
+  uint32 heap_end;
+  struct mem_region *r;
   struct proc *p = myproc();
 
-  if (va >= p->sz)
+  heap_end = as_region_start(&p->as, MR_HEAP) + as_region_size(&p->as, MR_HEAP);
+  if(va >= heap_end)
     return 0;
   va = PGROUNDDOWN(va);
 
@@ -495,11 +803,15 @@ vmfault(pagetable_t pagetable, uint32 va, int read)
   if(ismapped(pagetable, va))
     return 0;
 
+  r = as_find_region(&p->as, va);
+  if(r == 0 || r->type != MR_HEAP)
+    return 0;
+
   mem = (uint32)kalloc();
   if(mem == 0)
     return 0;
   memset((void *)mem, 0, PGSIZE);
-  if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0) {
+  if(mappages(pagetable, va, PGSIZE, mem, PTE_U | r->perm) != 0){
     kfree((void *)mem);
     return 0;
   }

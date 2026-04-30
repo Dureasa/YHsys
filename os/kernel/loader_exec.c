@@ -97,8 +97,11 @@ kexec(char *path, char **argv)
   struct elfhdr elf;
   struct inode *ip;
   struct proghdr ph;
-  pagetable_t pagetable = 0, oldpagetable;
+  pagetable_t pagetable = 0;
+  struct addr_space old_as, new_as;
   struct proc *p = myproc();
+  memset(&old_as, 0, sizeof(old_as));
+  memset(&new_as, 0, sizeof(new_as));
 
   begin_op();
 
@@ -117,7 +120,9 @@ kexec(char *path, char **argv)
   if(elf.magic != ELF_MAGIC)
     goto bad;
 
-  if((pagetable = proc_pagetable(p)) == 0)
+  new_as = proc_addrspace_create(p);
+  pagetable = new_as.pagetable;
+  if(pagetable == 0)
     goto bad;
 
   // Randomize physical placement of code pages without breaking
@@ -167,30 +172,34 @@ kexec(char *path, char **argv)
   end_op();
   ip = 0;
 
-  p = myproc();
-  uint32 oldsz = p->sz;
-
   // Allocate some pages at the next page boundary.
   // Make the first inaccessible as a stack guard.
   // Use the rest as the user stack.
-  sz = PGROUNDUP(sz);
+  uint32 text_end = PGROUNDUP(sz);
   uint32 stack_gap = aslr_pages(ASLR_STACK_GAP_MAX_PAGES) * PGSIZE;
-  uint32 stack_end = sz + stack_gap + (USERSTACK+1)*PGSIZE;
-  if(stack_end < sz || stack_end >= TRAPFRAME)
+  uint32 stack_end = text_end + stack_gap + (USERSTACK+1)*PGSIZE;
+  uint32 stack_guard = stack_end - (USERSTACK+1)*PGSIZE;
+  if(stack_end < text_end || stack_end >= TRAPFRAME)
     goto bad;
 
   uint32 sz1;
-  if((sz1 = uvmalloc(pagetable, sz, stack_end, PTE_W)) == 0)
+  if((sz1 = uvmalloc(&new_as, stack_guard, stack_end, PTE_W)) == 0)
     goto bad;
-  sz = sz1;
-  uvmclear(pagetable, sz-(USERSTACK+1)*PGSIZE);
-  sp = sz;
+  uvmclear(pagetable, stack_guard);
+  sp = sz1;
   stackbase = sp - USERSTACK*PGSIZE;
 
   uint32 heap_gap = aslr_pages(ASLR_HEAP_GAP_MAX_PAGES) * PGSIZE;
-  if(sz + heap_gap < sz || sz + heap_gap >= TRAPFRAME)
+  uint32 heap_base = sz1 + heap_gap;
+  if(heap_base < sz1 || heap_base >= TRAPFRAME)
     goto bad;
-  sz += heap_gap;
+
+  if(as_add_region(&new_as, 0, text_end, MR_TEXT, PTE_R | PTE_W | PTE_X) < 0)
+    goto bad;
+  if(as_add_region(&new_as, stack_guard, sz1, MR_STACK, PTE_R | PTE_W) < 0)
+    goto bad;
+  if(as_add_region(&new_as, heap_base, heap_base, MR_HEAP, PTE_R | PTE_W) < 0)
+    goto bad;
 
   // Copy argument strings into new stack, remember their
   // addresses in ustack[].
@@ -230,12 +239,12 @@ kexec(char *path, char **argv)
     goto bad;
 
   // Commit to the user image.
-  oldpagetable = p->pagetable;
-  p->pagetable = pagetable;
-  p->sz = sz;
+  old_as = p->as;
+  p->as = new_as;
+  new_as.pagetable = 0;
   p->trapframe->epc = elf.entry;  // initial program counter = ulib.c:start()
   p->trapframe->sp = sp; // initial stack pointer
-  proc_freepagetable(oldpagetable, oldsz);
+  as_destroy(&old_as);
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
@@ -246,8 +255,8 @@ kexec(char *path, char **argv)
       jitter_pages[i] = 0;
     }
   }
-  if(pagetable)
-    proc_freepagetable(pagetable, sz);
+  if(new_as.pagetable)
+    as_destroy(&new_as);
   if(ip){
     iunlockput(ip);
     end_op();

@@ -40,12 +40,15 @@ uint64
 sys_sbrk(void)
 {
   uint64 addr;
+  uint64 new_end;
   int t;
   int n;
+  struct proc *p;
 
   argint(0, &n);
   argint(1, &t);
-  addr = myproc()->sz;
+  p = myproc();
+  addr = as_region_start(&p->as, MR_HEAP) + as_region_size(&p->as, MR_HEAP);
 
   if(t == SBRK_EAGER || n < 0) {
     if(growproc(n) < 0) {
@@ -59,7 +62,9 @@ sys_sbrk(void)
       return -1;
     if(addr + n > TRAPFRAME)
       return -1;
-    myproc()->sz += n;
+    new_end = addr + n;
+    if(as_resize_region(&p->as, MR_HEAP, (uint32)new_end) < 0)
+      return -1;
   }
   return addr;
 }

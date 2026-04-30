@@ -95,7 +95,8 @@ $(K)/file.c \
 $(K)/pipe.c \
 $(K)/loader_exec.c \
 $(K)/plic.c \
-$(K)/virtio_disk.c
+$(K)/virtio_disk.c \
+$(K)/sem.c
 
 KERNEL_S_SRCS = \
 $(K)/entry.S \
@@ -111,7 +112,7 @@ ULIB_SRCS = $(U)/ulib.c $(U)/printf.c $(U)/umalloc.c $(U)/div64.c
 ULIB_OBJS = $(patsubst $(U)/%.c,$(OBJDIR)/user/%.o,$(ULIB_SRCS))
 
 USER_APPS = \
-cat banner echo forktest grep guess init kill ln ls mkdir rm rps sh usertests wc logstress forphan dorphan
+cat banner echo forktest grep guess init kill ln ls mkdir rm rps sh usertests wc logstress forphan dorphan semtest
 
 USER_APP_OBJS = $(addprefix $(OBJDIR)/user/,$(addsuffix .o,$(USER_APPS)))
 USER_BINS = $(addprefix $(BINDIR)/user/_,$(USER_APPS))
